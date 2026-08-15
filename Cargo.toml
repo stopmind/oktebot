@@ -4,11 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.104"
 log = "0.4.33"
-tokio = { version = "1.53.1", features = ["rt", "macros"] }
-reqwest = "=0.12.28"
-teloxide = "0.17.0"
+toml = "1.1.4+spec-1.1.0"
+serde = "1.0.229"
 
 [dependencies.stop-log]
 git = "https://github.com/stopmind/stop-log"
+
+[dependencies.anyhow]
+version = "1.0.104"
+default-features = false
+
+[dependencies.tokio]
+version = "1.53.1"
+features = ["rt", "macros"]
+
+[dependencies.teloxide]
+version = "0.17.0"
+features = ["macros"]
