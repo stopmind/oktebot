@@ -1,42 +1,26 @@
-use std::ops::Deref;
 use std::sync::Arc;
 use teloxide::prelude::*;
-use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::{Dialogue, Message};
 use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, User};
 use anyhow::Result;
 use log::info;
 use crate::config::Config;
-
-pub const SUPPORT_CANCEL: &str = "support-cancel";
-
-pub type SupportDialogue = Dialogue<SupportState, InMemStorage<SupportState>>;
-
-#[derive(Clone, Default)]
-pub enum SupportState {
-    #[default]
-    None,
-    WaitMessage
-}
-
-pub async fn on_start(bot: Bot, message: Message) -> Result<()> {
-    bot.send_message(message.chat.id, "Hello!").await?;
-    Ok(())
-}
+use crate::scheme::CANCEL_CALLBACK;
+use crate::session::{Session, SessionState};
 
 pub async fn on_support(
     bot: Bot,
-    dialogue: SupportDialogue,
+    session: Session,
     message: Message
 ) -> Result<()> {
     if matches!(message.chat.kind, ChatKind::Private(..)) {
-        dialogue.update(SupportState::WaitMessage).await?;
+        session.update(SessionState::WaitSupportMessage).await?;
 
         bot.send_message(message.chat.id, "Отправьте сообщение для тех. поддержки.")
             .reply_markup(InlineKeyboardMarkup::new([[
                 InlineKeyboardButton::new(
                     "Отмена",
-                    InlineKeyboardButtonKind::CallbackData(SUPPORT_CANCEL.to_string())
+                    InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string())
                 )
             ]]))
             .await?;
@@ -49,11 +33,11 @@ pub async fn on_support(
 
 pub async fn on_support_message(
     bot: Bot,
-    dialogue: SupportDialogue,
+    session: Session,
     message: Message,
     config: Arc<Config>,
 ) -> Result<()> {
-    dialogue.exit().await?;
+    session.exit().await?;
 
     info!("Received support message from: {} text: {}",
         message.from.as_ref()
@@ -64,10 +48,7 @@ pub async fn on_support_message(
         message.text().unwrap_or("none")
     );
 
-    let a =  bot.forward_message(config.admin_chat, message.chat.id, message.id);
-    info!("{:?}", a.deref());
-    a.await?;
-
+    bot.forward_message(config.admin_chat, message.chat.id, message.id).await?;
     bot.send_message(message.chat.id, "Сообщение отправлено!").await?;
 
     Ok(())
@@ -76,10 +57,10 @@ pub async fn on_support_message(
 pub async fn on_support_cancel(
     bot: Bot,
     query: CallbackQuery,
-    dialogue: SupportDialogue
+    session: Session
 ) -> Result<()> {
-    dialogue.exit().await?;
-    bot.send_message(dialogue.chat_id(), "Отменено.").await?;
+    session.exit().await?;
+    bot.send_message(session.chat_id(), "Отменено.").await?;
     bot.answer_callback_query(query.id).await?;
     Ok(())
 }

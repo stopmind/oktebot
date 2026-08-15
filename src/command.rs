@@ -6,5 +6,7 @@ pub enum Command {
     Start,
     Help,
     Support,
-    
+    Bio,
+    Me,
+    Info(i32)
 }
