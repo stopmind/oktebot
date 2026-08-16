@@ -11,7 +11,7 @@ use log::{info, LevelFilter};
 use teloxide::prelude::*;
 use teloxide::dispatching::dialogue::InMemStorage;
 use crate::config::Config;
-use crate::oknoid::IdDb;
+use crate::oknoid::OknoId;
 use crate::scheme::scheme;
 use crate::session::SessionState;
 use crate::support::*;
@@ -21,15 +21,15 @@ async fn main() {
     stop_log::init(None, LevelFilter::Info);
     info!("Starting bot...");
 
-    let config = Config::read("config.toml").unwrap();
-    let db = IdDb::open("id.db").await.unwrap();
+    let config = Arc::new(Config::read("config.toml").unwrap());
+    let db = OknoId::open("id.db", config.clone()).await.unwrap();
 
     let bot = Bot::new(config.token.clone());
 
     Dispatcher::builder(bot, scheme())
         .dependencies(dptree::deps![
             InMemStorage::<SessionState>::new(),
-            Arc::new(config),
+            config,
             Arc::new(db)
         ])
         .enable_ctrlc_handler()

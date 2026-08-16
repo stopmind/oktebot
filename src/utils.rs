@@ -1,4 +1,5 @@
 use teloxide::types::{CallbackQuery, UserId};
+use crate::oknoid::OknoId;
 
 /// Requires CallbackQuery
 pub fn callback_filter(
@@ -23,6 +24,13 @@ impl<'s> Mention<'s> {
             val.parse().ok()
                 .map(UserId)
                 .map(Mention::UserId)
+        }
+    }
+
+    pub fn resolve(self, db: &OknoId) -> Option<UserId> {
+        match self {
+            Mention::Username(username) => db.resolve_username(username),
+            Mention::UserId(id) => Some(id),
         }
     }
 }

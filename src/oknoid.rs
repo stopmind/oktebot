@@ -3,13 +3,14 @@ use log::{error, info};
 use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
 use std::{fs, path::Path, sync::Arc};
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap};
 use std::fmt::{Display, Formatter};
 use std::ops::DerefMut;
 use std::sync::Mutex;
 use teloxide::Bot;
 use teloxide::prelude::*;
 use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, User};
+use crate::config::Config;
 use crate::scheme::CANCEL_CALLBACK;
 use crate::session::{Session, SessionState};
 use crate::utils::Mention;
@@ -33,7 +34,7 @@ impl Display for UserRole {
 }
 
 impl UserRole {
-    fn from_db(val: i64) -> Option<UserRole> {
+    const fn from_db(val: i64) -> Option<UserRole> {
         macro_rules! chk {
             ($($i:ident),*) => {
                 match val {
@@ -51,7 +52,7 @@ impl UserRole {
         )
     }
 
-    fn to_db(self) -> i64 {
+    const fn to_db(self) -> i64 {
         self as i64
     }
 }
@@ -68,13 +69,14 @@ struct Usernames {
     id_to_username: HashMap<UserId, String>,
 }
 
-pub struct IdDb {
+pub struct OknoId {
     pool: SqlitePool,
+    config: Arc<Config>,
     usernames: Mutex<Usernames>,
 }
 
-impl IdDb {
-    pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
+impl OknoId {
+    pub async fn open(path: impl AsRef<Path>, config: Arc<Config>) -> Result<Self> {
         let path = path.as_ref();
         let do_initialize = !fs::exists(path)?;
 
@@ -105,8 +107,9 @@ impl IdDb {
 
         info!("Id database loaded.");
 
-        Ok(IdDb {
+        Ok(OknoId {
             pool,
+            config,
             usernames: Mutex::new(Usernames {
                 username_to_id,
                 id_to_username,
@@ -133,10 +136,11 @@ impl IdDb {
     }
 }
 
-impl IdDb {
+impl OknoId {
     async fn register_user(&self, id: UserId, username: String, info: UserInfo) -> Result<()> {
         {
-            let mut usernames = self.usernames.lock().unwrap();
+            let mut usernames = self.usernames.lock()
+                .map_err(|_| anyhow!("Failed to lock usernames!"))?;
             if usernames.id_to_username.contains_key(&id) {
                 return Err(anyhow!("User already exists"));
             }
@@ -213,8 +217,12 @@ impl IdDb {
                 .fetch_one(&self.pool)
                 .await?;
 
-        let role = UserRole::from_db(role)
+        let mut role = UserRole::from_db(role)
             .ok_or_else(|| anyhow!("Invalid user role ID: {}", role))?;
+
+        if self.config.super_admins.contains(&id) {
+            role = UserRole::SuperAdmin;
+        }
 
         Ok(UserInfo {
             role,
@@ -222,11 +230,54 @@ impl IdDb {
             bio,
         })
     }
+
+    async fn get_user_role(&self, id: UserId) -> Result<UserRole> {
+        if self.config.super_admins.contains(&id) {
+            return Ok(UserRole::SuperAdmin);
+        }
+
+        let (role,) = sqlx::query_as("SELECT role FROM users WHERE id = ?")
+            .bind(id.0 as i64)
+            .fetch_one(&self.pool)
+            .await?;
+
+        UserRole::from_db(role)
+            .ok_or_else(|| anyhow!("Invalid user role ID: {}", role))
+    }
+
+    async fn set_user_role(&self, id: UserId, role: UserRole) -> Result<()> {
+        sqlx::query("UPDATE users SET role = ? WHERE id = ?")
+            .bind(role.to_db())
+            .bind(id.0 as i64)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    fn is_super_admin(&self, id: UserId) -> bool {
+        self.config.super_admins.contains(&id)
+    }
+
+    async fn add_reputation(&self, id: UserId, val: i64) -> Result<i64> {
+        Ok(
+            sqlx::query_as::<'_, _, (i64,)>("\
+                UPDATE users \
+                SET reputation = reputation + ? \
+                WHERE id = ? \
+                RETURNING reputation \
+                ")
+                .bind(val)
+                .bind(id.0 as i64)
+                .fetch_one(&self.pool)
+                .await?.0
+        )
+    }
 }
 
 pub async fn usernames_inspect(
     message: Message,
-    db: Arc<IdDb>
+    db: Arc<OknoId>
 ) {
     if let Some(User { id, username: Some(username), ..}) = message.from.as_ref() {
         if let Err(err) = db.update_username(*id, username.clone()).await {
@@ -238,7 +289,7 @@ pub async fn usernames_inspect(
 pub async fn on_start(
     bot: Bot,
     message: Message,
-    db: Arc<IdDb>,
+    db: Arc<OknoId>,
 ) -> Result<()> {
     let Some(User { id, username: Some(username), ..}) = message.from.as_ref() else {
         bail!("failed get user or username");
@@ -279,7 +330,7 @@ pub async fn on_bio_message(
     bot: Bot,
     session: Session,
     message: Message,
-    db: Arc<IdDb>,
+    db: Arc<OknoId>,
 ) -> Result<()> {
     let Some(text) = message.text() else {
         bot.send_message(message.chat.id, "Отправьте сообщение с текстом!").await?;
@@ -314,7 +365,7 @@ pub async fn on_bio_cancel(
 
 async fn send_profile(
     bot: &Bot,
-    db: &IdDb,
+    db: &OknoId,
     chat_id: ChatId,
     user_id: UserId,
     username: &str
@@ -347,9 +398,9 @@ pub async fn on_info(
     bot: Bot,
     message: Message,
     mention: String,
-    db: Arc<IdDb>,
+    db: Arc<OknoId>,
 ) -> Result<()> {
-    async fn inner<'m>(mention: &'m str, db: &IdDb) -> Option<(UserId, Cow<'m, str>)> {
+    async fn inner<'m>(mention: &'m str, db: &OknoId) -> Option<(UserId, Cow<'m, str>)> {
         let mention = Mention::parse(mention)?;
         Some(match mention {
             Mention::Username(username) =>
@@ -373,11 +424,65 @@ pub async fn on_info(
 pub async fn on_me(
     bot: Bot,
     message: Message,
-    db: Arc<IdDb>,
+    db: Arc<OknoId>,
 ) -> Result<()> {
     let Some(User { id, username: Some(username), ..}) = message.from.as_ref() else {
         bail!("failed get user or username");
     };
 
     send_profile(&bot, &db, message.chat.id, *id, username.as_str()).await
+}
+
+pub async fn add_admin(
+    bot: Bot,
+    message: Message,
+    db: Arc<OknoId>,
+    mention: String,
+) -> Result<()> {
+    todo!()
+}
+
+pub async fn del_admin(
+    bot: Bot,
+    message: Message,
+    db: Arc<OknoId>,
+    mention: String,
+) -> Result<()> {
+    todo!()
+}
+
+pub async fn change_rep(
+    bot: Bot,
+    message: Message,
+    db: Arc<OknoId>,
+    (mention, value): (String, i64),
+) -> Result<()> {
+    let Some(User { id: user_id , ..}) = message.from else {
+        bail!("Failed get user id");
+    };
+    if db.get_user_role(user_id).await? < UserRole::Admin {
+        bot.send_message(message.chat.id, "У вас недостаточно прав")
+            .await?;
+        return Ok(());
+    }
+
+    let Some(mention) = Mention::parse(mention.as_str()) else {
+        bot.send_message(message.chat.id, "Нужно указывать id или @имя пользователя, зарегестрированного в боте")
+            .await?;
+        return Ok(());
+    };
+
+    let Some(target_id) = mention.resolve(&db) else {
+        bot.send_message(message.chat.id, "Неизвестный пользователь")
+            .await?;
+        return Ok(());
+    };
+
+    let new_rep = db.add_reputation(target_id, value).await?;
+
+    bot.send_message(message.chat.id,
+        format!("Обновленная репутация: {new_rep}")
+    ).await?;
+
+    Ok(())
 }
