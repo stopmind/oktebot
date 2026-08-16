@@ -8,5 +8,5 @@ pub enum Command {
     Support,
     Bio,
     Me,
-    Info(i32)
+    Info(String)
 }

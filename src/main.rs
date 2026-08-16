@@ -30,7 +30,7 @@ async fn main() {
         .dependencies(dptree::deps![
             InMemStorage::<SessionState>::new(),
             Arc::new(config),
-            db
+            Arc::new(db)
         ])
         .enable_ctrlc_handler()
         .build()

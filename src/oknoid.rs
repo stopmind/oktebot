@@ -2,12 +2,17 @@ use anyhow::{anyhow, bail, Result};
 use log::{error, info};
 use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
 use std::{fs, path::Path, sync::Arc};
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::ops::DerefMut;
+use std::sync::Mutex;
 use teloxide::Bot;
 use teloxide::prelude::*;
 use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, User};
 use crate::scheme::CANCEL_CALLBACK;
 use crate::session::{Session, SessionState};
+use crate::utils::Mention;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
 pub enum UserRole {
@@ -28,11 +33,11 @@ impl Display for UserRole {
 }
 
 impl UserRole {
-    fn from_i32(val: i32) -> Option<UserRole> {
+    fn from_db(val: i64) -> Option<UserRole> {
         macro_rules! chk {
             ($($i:ident),*) => {
                 match val {
-                    $(x if x == $i as i32 => Some($i),)*
+                    $(x if x == $i as i64 => Some($i),)*
                     _ => None
                 }
             };
@@ -45,18 +50,27 @@ impl UserRole {
             SuperAdmin
         )
     }
+
+    fn to_db(self) -> i64 {
+        self as i64
+    }
 }
 
 #[derive(Default)]
 pub struct UserInfo {
     role: UserRole,
-    reputation: i32,
+    reputation: i64,
     bio: Option<String>,
 }
 
-#[derive(Clone)]
+struct Usernames {
+    username_to_id: HashMap<String, UserId>,
+    id_to_username: HashMap<UserId, String>,
+}
+
 pub struct IdDb {
-    pool: Arc<SqlitePool>,
+    pool: SqlitePool,
+    usernames: Mutex<Usernames>,
 }
 
 impl IdDb {
@@ -76,10 +90,27 @@ impl IdDb {
             Self::initialize(&pool).await?;
         };
 
+        let mut username_to_id = HashMap::new();
+        let mut id_to_username = HashMap::new();
+
+        let users =sqlx::query_as::<'_, _, (i64, String)>("SELECT id, username FROM users")
+            .fetch_all(&pool)
+            .await?;
+
+        for (id, username) in users {
+            let id = UserId(id as u64);
+            username_to_id.insert(username.clone(), id);
+            id_to_username.insert(id, username);
+        }
+
         info!("Id database loaded.");
 
         Ok(IdDb {
-            pool: Arc::new(pool),
+            pool,
+            usernames: Mutex::new(Usernames {
+                username_to_id,
+                id_to_username,
+            })
         })
     }
 
@@ -92,32 +123,84 @@ impl IdDb {
                     NOT NULL, \
                 reputation INTEGER \
                     NOT NULL, \
-                bio TEXT \
+                bio TEXT, \
+                username TEXT \
+                    NOT NULL
             ) WITHOUT ROWID, STRICT;")
-        .execute(pool)
-        .await?;
+            .execute(pool)
+            .await?;
         Ok(())
     }
 }
 
 impl IdDb {
-    async fn register_user(&self, id: UserId, info: UserInfo) -> Result<()> {
-        sqlx::query("INSERT INTO users (id, role, reputation, bio) VALUES (?, ?, ?, ?)")
-            .bind(id.0 as i32)
-            .bind(info.role as i32)
+    async fn register_user(&self, id: UserId, username: String, info: UserInfo) -> Result<()> {
+        {
+            let mut usernames = self.usernames.lock().unwrap();
+            if usernames.id_to_username.contains_key(&id) {
+                return Err(anyhow!("User already exists"));
+            }
+
+            usernames.id_to_username.insert(id, username.clone());
+            usernames.username_to_id.insert(username.clone(), id);
+        }
+        sqlx::query("INSERT INTO users (id, role, reputation, bio, username) VALUES (?, ?, ?, ?, ?)")
+            .bind(id.0 as i64)
+            .bind(info.role.to_db())
             .bind(info.reputation)
             .bind(info.bio)
-            .execute(self.pool.as_ref())
+            .bind(username)
+            .execute(&self.pool)
             .await?;
 
         Ok(())
     }
 
+    async fn update_username(&self, user_id: UserId, username: String) -> Result<()> {
+        let query = {
+            let mut guard = self.usernames.lock()
+                .map_err(|_| anyhow!("Failed to lock usernames!"))?;
+
+            let usernames = guard.deref_mut();
+
+            if let Some(old_username) = usernames.id_to_username.get_mut(&user_id) &&
+                old_username != username.as_str()
+            {
+                let query = sqlx::query("UPDATE users SET username = ? WHERE id = ?")
+                    .bind(&username)
+                    .bind(user_id.0 as i64);
+
+                usernames.username_to_id.remove(old_username);
+                old_username.clear();
+                old_username.push_str(&username);
+                usernames.username_to_id.insert(username, user_id);
+
+                Some(query)
+            } else { None }
+        };
+
+        if let Some(query) = query {
+            query.execute(&self.pool).await?;
+        }
+
+        Ok(())
+    }
+
+    pub fn resolve_username(&self, username: &str) -> Option<UserId> {
+        self.usernames.lock().unwrap()
+            .username_to_id.get(username).copied()
+    }
+
+    pub fn get_username(&self, id: UserId) -> Option<String> {
+        self.usernames.lock().unwrap()
+            .id_to_username.get(&id).cloned()
+    }
+
     async fn set_bio(&self, id: UserId, bio: Option<&str>) -> Result<()> {
         sqlx::query("UPDATE users SET bio = ? WHERE id = ?")
             .bind(bio)
-            .bind(id.0 as i32)
-            .execute(self.pool.as_ref())
+            .bind(id.0 as i64)
+            .execute(&self.pool)
             .await?;
 
         Ok(())
@@ -126,11 +209,11 @@ impl IdDb {
     async fn get_user_info(&self, id: UserId) -> Result<UserInfo> {
         let (role, reputation, bio): (_, _, Option<String>) =
             sqlx::query_as("SELECT role, reputation, bio FROM users WHERE id = ?")
-                .bind(id.0 as i32)
-                .fetch_one(self.pool.as_ref())
+                .bind(id.0 as i64)
+                .fetch_one(&self.pool)
                 .await?;
 
-        let role = UserRole::from_i32(role)
+        let role = UserRole::from_db(role)
             .ok_or_else(|| anyhow!("Invalid user role ID: {}", role))?;
 
         Ok(UserInfo {
@@ -141,16 +224,27 @@ impl IdDb {
     }
 }
 
+pub async fn usernames_inspect(
+    message: Message,
+    db: Arc<IdDb>
+) {
+    if let Some(User { id, username: Some(username), ..}) = message.from.as_ref() {
+        if let Err(err) = db.update_username(*id, username.clone()).await {
+            error!("Error while updating username: {:?}", err);
+        }
+    }
+}
 
 pub async fn on_start(
     bot: Bot,
     message: Message,
-    db: IdDb,
+    db: Arc<IdDb>,
 ) -> Result<()> {
-    let user = message.from.as_ref()
-        .ok_or(anyhow!("Failed to retrieve user"))?;
+    let Some(User { id, username: Some(username), ..}) = message.from.as_ref() else {
+        bail!("failed get user or username");
+    };
 
-    if let Err(error) = db.register_user(user.id, UserInfo::default()).await {
+    if let Err(error) = db.register_user(*id, username.clone(), UserInfo::default()).await {
         error!("Error registering user: {:?}", error);
     };
 
@@ -185,7 +279,7 @@ pub async fn on_bio_message(
     bot: Bot,
     session: Session,
     message: Message,
-    db: IdDb,
+    db: Arc<IdDb>,
 ) -> Result<()> {
     let Some(text) = message.text() else {
         bot.send_message(message.chat.id, "Отправьте сообщение с текстом!").await?;
@@ -228,7 +322,7 @@ async fn send_profile(
     let info = db.get_user_info(user_id).await?;
     let text = if let Some(bio) = info.bio.as_ref() {
         format!(
-            "Пользователь: {username}\n\
+            "Пользователь: @{username}\n\
             Роль: {}\n\
             Репутация: {}.\n\
             Описание:\n\
@@ -252,19 +346,38 @@ async fn send_profile(
 pub async fn on_info(
     bot: Bot,
     message: Message,
-    db: IdDb,
+    mention: String,
+    db: Arc<IdDb>,
 ) -> Result<()> {
-    todo!()
+    async fn inner<'m>(mention: &'m str, db: &IdDb) -> Option<(UserId, Cow<'m, str>)> {
+        let mention = Mention::parse(mention)?;
+        Some(match mention {
+            Mention::Username(username) =>
+                (db.resolve_username(username)?, Cow::Borrowed(username)),
+            Mention::UserId(id) =>
+                (id, Cow::Owned(db.get_username(id)?))
+        })
+    }
+
+    if let Some((id, username)) = inner(&mention, &db).await {
+        send_profile(&bot, &db, message.chat.id, id, username.as_ref()).await?;
+    } else {
+        bot.send_message(message.chat.id,
+            "Пользователь не найден. Нужно указывать id или @имя пользователя, зарегестрированного в боте"
+        ).await?;
+    }
+
+    Ok(())
 }
 
 pub async fn on_me(
     bot: Bot,
     message: Message,
-    db: IdDb,
+    db: Arc<IdDb>,
 ) -> Result<()> {
     let Some(User { id, username: Some(username), ..}) = message.from.as_ref() else {
         bail!("failed get user or username");
     };
 
-    send_profile(&bot, &db, message.chat.id, id.clone(), username.as_str()).await
+    send_profile(&bot, &db, message.chat.id, *id, username.as_str()).await
 }

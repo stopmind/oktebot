@@ -15,12 +15,13 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
     dialogue::enter::<Update, InMemStorage<SessionState>, SessionState, _>()
         .branch(
             Update::filter_message()
+                .inspect_async(usernames_inspect)
                 .branch(
                     filter_command::<Command, _>()
                         .branch(case![Command::Start].endpoint(on_start))
                         .branch(case![Command::Support].endpoint(on_support))
                         .branch(case![Command::Bio].endpoint(on_bio))
-                        .branch(case![Command::Info(id)].endpoint(on_info))
+                        .branch(case![Command::Info(mention)].endpoint(on_info))
                         .branch(case![Command::Me].endpoint(on_me))
                 )
                 .branch(case![SessionState::WaitSupportMessage].endpoint(on_support_message))
