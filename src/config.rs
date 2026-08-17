@@ -9,7 +9,7 @@ use teloxide::types::{ChatId, UserId};
 pub struct Config {
     pub token: String,
     pub super_admins: BTreeSet<UserId>,
-    pub admin_chat: ChatId
+    pub support_chat: ChatId
 }
 impl Config {
     pub fn read(path: impl AsRef<Path>) -> Result<Self> {

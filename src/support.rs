@@ -48,7 +48,7 @@ pub async fn on_support_message(
         message.text().unwrap_or("none")
     );
 
-    bot.forward_message(config.admin_chat, message.chat.id, message.id).await?;
+    bot.forward_message(config.support_chat, message.chat.id, message.id).await?;
     bot.send_message(message.chat.id, "Сообщение отправлено!").await?;
 
     Ok(())

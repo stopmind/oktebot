@@ -299,7 +299,7 @@ pub async fn on_start(
         error!("Error registering user: {:?}", error);
     };
 
-    bot.send_message(message.chat.id, "НЕ ЗАБУДЬ ПЕРЕДЕЛАТЬ ЭТО СООБЩЕНИЕ").await?;
+    bot.send_message(message.chat.id, "Используйте /bio для изменения описаня профиля.").await?;
     Ok(())
 }
 
@@ -433,13 +433,62 @@ pub async fn on_me(
     send_profile(&bot, &db, message.chat.id, *id, username.as_str()).await
 }
 
+async fn change_role_with_condition(
+    bot: &Bot,
+    db: &OknoId,
+    message: &Message,
+    mention: &str,
+    role: UserRole,
+    condition: impl FnOnce(UserRole) -> bool,
+) -> Result<bool> {
+    let Some(User { id: user_id , ..}) = message.from else {
+        bail!("Failed get user id");
+    };
+    if db.get_user_role(user_id).await? < UserRole::Admin {
+        bot.send_message(message.chat.id, "У вас недостаточно прав")
+            .await?;
+        return Ok(false);
+    }
+
+    let Some(mention) = Mention::parse(mention) else {
+        bot.send_message(message.chat.id, "Нужно указывать id или @имя пользователя, зарегестрированного в боте")
+            .await?;
+        return Ok(false);
+    };
+
+    let Some(target_id) = mention.resolve(&db) else {
+        bot.send_message(message.chat.id, "Неизвестный пользователь")
+            .await?;
+        return Ok(false);
+    };
+
+    let current_role = db.get_user_role(target_id).await?;
+    let proceed = condition(current_role);
+
+    if proceed {
+        db.set_user_role(target_id, role).await?;
+    } else {
+        bot.send_message(message.chat.id, format!("Пользователь имеет роль: {current_role}"))
+            .await?;
+    }
+
+    Ok(proceed)
+}
+
 pub async fn add_admin(
     bot: Bot,
     message: Message,
     db: Arc<OknoId>,
     mention: String,
 ) -> Result<()> {
-    todo!()
+    if change_role_with_condition(&bot, &db, &message, &mention, UserRole::Admin, |r| r < UserRole::Admin)
+        .await?
+    {
+        bot.send_message(message.chat.id, format!("Пользователь назначен админом."))
+            .await?;
+    }
+
+    Ok(())
 }
 
 pub async fn del_admin(
@@ -448,7 +497,14 @@ pub async fn del_admin(
     db: Arc<OknoId>,
     mention: String,
 ) -> Result<()> {
-    todo!()
+    if change_role_with_condition(&bot, &db, &message, &mention, UserRole::Standard, |r| r == UserRole::Admin)
+        .await?
+    {
+        bot.send_message(message.chat.id, format!("Пользователь более не является админом."))
+            .await?;
+    }
+
+    Ok(())
 }
 
 pub async fn change_rep(
