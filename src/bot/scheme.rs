@@ -3,11 +3,11 @@ use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::dptree::case;
 use teloxide::filter_command;
 use teloxide::prelude::*;
-use crate::command::Command;
-use crate::oknoid::*;
-use crate::session::SessionState;
-use crate::support::*;
-use crate::utils;
+use crate::bot::command::Command;
+use crate::bot::profile::{add_admin, change_rep, del_admin, on_bio, on_bio_cancel, on_bio_message, on_info, on_me, on_start, usernames_inspect};
+use crate::bot::session::SessionState;
+use crate::bot::support::*;
+use crate::bot::utils;
 
 pub const CANCEL_CALLBACK: &str = "cancel";
 

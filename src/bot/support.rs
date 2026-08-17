@@ -5,8 +5,8 @@ use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, 
 use anyhow::Result;
 use log::info;
 use crate::config::Config;
-use crate::scheme::CANCEL_CALLBACK;
-use crate::session::{Session, SessionState};
+use crate::bot::scheme::CANCEL_CALLBACK;
+use crate::bot::session::{Session, SessionState};
 
 pub async fn on_support(
     bot: Bot,
