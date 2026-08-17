@@ -1,31 +1,34 @@
-use std::sync::Arc;
-use teloxide::prelude::*;
-use teloxide::prelude::{Dialogue, Message};
-use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, User};
+use crate::{
+    bot::{
+        scheme::CANCEL_CALLBACK,
+        session::{Session, SessionState},
+    },
+    config::Config,
+};
 use anyhow::Result;
 use log::info;
-use crate::config::Config;
-use crate::bot::scheme::CANCEL_CALLBACK;
-use crate::bot::session::{Session, SessionState};
+use std::sync::Arc;
+use teloxide::{
+    prelude::{Message, *},
+    types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup},
+};
 
-pub async fn on_support(
-    bot: Bot,
-    session: Session,
-    message: Message
-) -> Result<()> {
+pub async fn on_support(bot: Bot, session: Session, message: Message) -> Result<()> {
     if matches!(message.chat.kind, ChatKind::Private(..)) {
         session.update(SessionState::WaitSupportMessage).await?;
 
         bot.send_message(message.chat.id, "Отправьте сообщение для тех. поддержки.")
-            .reply_markup(InlineKeyboardMarkup::new([[
-                InlineKeyboardButton::new(
-                    "Отмена",
-                    InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string())
-                )
-            ]]))
+            .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
+                "Отмена",
+                InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string()),
+            )]]))
             .await?;
     } else {
-        bot.send_message(message.chat.id, "Команда может быть использована только в личных сообщениях.").await?;
+        bot.send_message(
+            message.chat.id,
+            "Команда может быть использована только в личных сообщениях.",
+        )
+        .await?;
     }
 
     Ok(())
@@ -39,26 +42,26 @@ pub async fn on_support_message(
 ) -> Result<()> {
     session.exit().await?;
 
-    info!("Received support message from: {} text: {}",
-        message.from.as_ref()
-            .map(|u| u.username.as_ref())
-            .flatten()
+    info!(
+        "Received support message from: {} text: {}",
+        message
+            .from
+            .as_ref()
+            .and_then(|from| from.username.as_ref())
             .map(String::as_str)
             .unwrap_or("unknown"),
         message.text().unwrap_or("none")
     );
 
-    bot.forward_message(config.support_chat, message.chat.id, message.id).await?;
-    bot.send_message(message.chat.id, "Сообщение отправлено!").await?;
+    bot.forward_message(config.support_chat, message.chat.id, message.id)
+        .await?;
+    bot.send_message(message.chat.id, "Сообщение отправлено!")
+        .await?;
 
     Ok(())
 }
 
-pub async fn on_support_cancel(
-    bot: Bot,
-    query: CallbackQuery,
-    session: Session
-) -> Result<()> {
+pub async fn on_support_cancel(bot: Bot, query: CallbackQuery, session: Session) -> Result<()> {
     session.exit().await?;
     bot.send_message(session.chat_id(), "Отменено.").await?;
     bot.answer_callback_query(query.id).await?;

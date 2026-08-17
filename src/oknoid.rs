@@ -1,22 +1,23 @@
-use anyhow::{anyhow, bail, Result};
-use log::{error, info};
-use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
-use std::{fs, path::Path, sync::Arc};
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::ops::DerefMut;
-use std::sync::Mutex;
-use teloxide::prelude::*;
-use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, User};
 use crate::config::Config;
-use crate::bot::session::{Session, SessionState};
+use anyhow::{Result, anyhow};
+use log::info;
+use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
+use std::{
+    collections::HashMap,
+    fmt::{Display, Formatter},
+    fs,
+    ops::DerefMut,
+    path::Path,
+    sync::{Arc, Mutex},
+};
+use teloxide::prelude::*;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
 pub enum UserRole {
     #[default]
     Standard = 0,
     Admin = 1,
-    SuperAdmin = 2
+    SuperAdmin = 2,
 }
 
 impl Display for UserRole {
@@ -41,11 +42,7 @@ impl UserRole {
         }
 
         use UserRole::*;
-        chk!(
-            Standard,
-            Admin,
-            SuperAdmin
-        )
+        chk!(Standard, Admin, SuperAdmin)
     }
 
     const fn to_db(self) -> i64 {
@@ -55,9 +52,9 @@ impl UserRole {
 
 #[derive(Default)]
 pub struct UserInfo {
-    pub(crate) role: UserRole,
-    pub(crate) reputation: i64,
-    pub(crate) bio: Option<String>,
+    pub role: UserRole,
+    pub reputation: i64,
+    pub bio: Option<String>,
 }
 
 struct Usernames {
@@ -91,7 +88,7 @@ impl OknoId {
         let mut username_to_id = HashMap::new();
         let mut id_to_username = HashMap::new();
 
-        let users =sqlx::query_as::<'_, _, (i64, String)>("SELECT id, username FROM users")
+        let users = sqlx::query_as::<'_, _, (i64, String)>("SELECT id, username FROM users")
             .fetch_all(&pool)
             .await?;
 
@@ -109,12 +106,13 @@ impl OknoId {
             usernames: Mutex::new(Usernames {
                 username_to_id,
                 id_to_username,
-            })
+            }),
         })
     }
 
     async fn initialize(pool: &SqlitePool) -> Result<()> {
-        sqlx::raw_sql("
+        sqlx::raw_sql(
+            "
             CREATE TABLE users ( \
                 id INTEGER \
                     PRIMARY KEY NOT NULL UNIQUE, \
@@ -125,17 +123,20 @@ impl OknoId {
                 bio TEXT, \
                 username TEXT \
                     NOT NULL
-            ) WITHOUT ROWID, STRICT;")
-            .execute(pool)
-            .await?;
+            ) WITHOUT ROWID, STRICT;",
+        )
+        .execute(pool)
+        .await?;
         Ok(())
     }
 }
 
 impl OknoId {
-    pub(crate) async fn register_user(&self, id: UserId, username: String, info: UserInfo) -> Result<()> {
+    pub async fn register_user(&self, id: UserId, username: String, info: UserInfo) -> Result<()> {
         {
-            let mut usernames = self.usernames.lock()
+            let mut usernames = self
+                .usernames
+                .lock()
                 .map_err(|_| anyhow!("Failed to lock usernames!"))?;
             if usernames.id_to_username.contains_key(&id) {
                 return Err(anyhow!("User already exists"));
@@ -144,27 +145,31 @@ impl OknoId {
             usernames.id_to_username.insert(id, username.clone());
             usernames.username_to_id.insert(username.clone(), id);
         }
-        sqlx::query("INSERT INTO users (id, role, reputation, bio, username) VALUES (?, ?, ?, ?, ?)")
-            .bind(id.0 as i64)
-            .bind(info.role.to_db())
-            .bind(info.reputation)
-            .bind(info.bio)
-            .bind(username)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "INSERT INTO users (id, role, reputation, bio, username) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(id.0 as i64)
+        .bind(info.role.to_db())
+        .bind(info.reputation)
+        .bind(info.bio)
+        .bind(username)
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
 
-    pub(crate) async fn update_username(&self, user_id: UserId, username: String) -> Result<()> {
+    pub async fn update_username(&self, user_id: UserId, username: String) -> Result<()> {
         let query = {
-            let mut guard = self.usernames.lock()
+            let mut guard = self
+                .usernames
+                .lock()
                 .map_err(|_| anyhow!("Failed to lock usernames!"))?;
 
             let usernames = guard.deref_mut();
 
-            if let Some(old_username) = usernames.id_to_username.get_mut(&user_id) &&
-                old_username != username.as_str()
+            if let Some(old_username) = usernames.id_to_username.get_mut(&user_id)
+                && old_username != username.as_str()
             {
                 let query = sqlx::query("UPDATE users SET username = ? WHERE id = ?")
                     .bind(&username)
@@ -176,7 +181,9 @@ impl OknoId {
                 usernames.username_to_id.insert(username, user_id);
 
                 Some(query)
-            } else { None }
+            } else {
+                None
+            }
         };
 
         if let Some(query) = query {
@@ -187,16 +194,24 @@ impl OknoId {
     }
 
     pub fn resolve_username(&self, username: &str) -> Option<UserId> {
-        self.usernames.lock().unwrap()
-            .username_to_id.get(username).copied()
+        self.usernames
+            .lock()
+            .unwrap()
+            .username_to_id
+            .get(username)
+            .copied()
     }
 
     pub fn get_username(&self, id: UserId) -> Option<String> {
-        self.usernames.lock().unwrap()
-            .id_to_username.get(&id).cloned()
+        self.usernames
+            .lock()
+            .unwrap()
+            .id_to_username
+            .get(&id)
+            .cloned()
     }
 
-    pub(crate) async fn set_bio(&self, id: UserId, bio: Option<&str>) -> Result<()> {
+    pub async fn set_bio(&self, id: UserId, bio: Option<&str>) -> Result<()> {
         sqlx::query("UPDATE users SET bio = ? WHERE id = ?")
             .bind(bio)
             .bind(id.0 as i64)
@@ -206,15 +221,15 @@ impl OknoId {
         Ok(())
     }
 
-    pub(crate) async fn get_user_info(&self, id: UserId) -> Result<UserInfo> {
+    pub async fn get_user_info(&self, id: UserId) -> Result<UserInfo> {
         let (role, reputation, bio): (_, _, Option<String>) =
             sqlx::query_as("SELECT role, reputation, bio FROM users WHERE id = ?")
                 .bind(id.0 as i64)
                 .fetch_one(&self.pool)
                 .await?;
 
-        let mut role = UserRole::from_db(role)
-            .ok_or_else(|| anyhow!("Invalid user role ID: {}", role))?;
+        let mut role =
+            UserRole::from_db(role).ok_or_else(|| anyhow!("Invalid user role ID: {}", role))?;
 
         if self.config.super_admins.contains(&id) {
             role = UserRole::SuperAdmin;
@@ -227,7 +242,7 @@ impl OknoId {
         })
     }
 
-    pub(crate) async fn get_user_role(&self, id: UserId) -> Result<UserRole> {
+    pub async fn get_user_role(&self, id: UserId) -> Result<UserRole> {
         if self.config.super_admins.contains(&id) {
             return Ok(UserRole::SuperAdmin);
         }
@@ -237,11 +252,10 @@ impl OknoId {
             .fetch_one(&self.pool)
             .await?;
 
-        UserRole::from_db(role)
-            .ok_or_else(|| anyhow!("Invalid user role ID: {}", role))
+        UserRole::from_db(role).ok_or_else(|| anyhow!("Invalid user role ID: {}", role))
     }
 
-    pub(crate) async fn set_user_role(&self, id: UserId, role: UserRole) -> Result<()> {
+    pub async fn set_user_role(&self, id: UserId, role: UserRole) -> Result<()> {
         sqlx::query("UPDATE users SET role = ? WHERE id = ?")
             .bind(role.to_db())
             .bind(id.0 as i64)
@@ -251,22 +265,24 @@ impl OknoId {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn is_super_admin(&self, id: UserId) -> bool {
         self.config.super_admins.contains(&id)
     }
 
-    pub(crate) async fn add_reputation(&self, id: UserId, val: i64) -> Result<i64> {
-        Ok(
-            sqlx::query_as::<'_, _, (i64,)>("\
+    pub async fn add_reputation(&self, id: UserId, val: i64) -> Result<i64> {
+        Ok(sqlx::query_as::<'_, _, (i64,)>(
+            "\
                 UPDATE users \
                 SET reputation = reputation + ? \
                 WHERE id = ? \
                 RETURNING reputation \
-                ")
-                .bind(val)
-                .bind(id.0 as i64)
-                .fetch_one(&self.pool)
-                .await?.0
+                ",
         )
+        .bind(val)
+        .bind(id.0 as i64)
+        .fetch_one(&self.pool)
+        .await?
+        .0)
     }
 }

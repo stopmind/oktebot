@@ -1,12 +1,11 @@
-use teloxide::dispatching::dialogue::InMemStorage;
-use teloxide::prelude::Dialogue;
+use teloxide::{dispatching::dialogue::InMemStorage, prelude::Dialogue};
 
 #[derive(Default, Clone)]
 pub enum SessionState {
     #[default]
     None,
     WaitBioMessage,
-    WaitSupportMessage
+    WaitSupportMessage,
 }
 
 pub type Session = Dialogue<SessionState, InMemStorage<SessionState>>;

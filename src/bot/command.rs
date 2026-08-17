@@ -7,11 +7,11 @@ pub enum Command {
     Help,
     Support,
     Bio,
-    #[command(alias="/info")]
+    #[command(alias = "/info")]
     Me,
     Info(String),
     AdminAdd(String),
     AdminDel(String),
     #[command(parse_with = "split")]
-    Rep(String, i64)
+    Rep(String, i64),
 }

@@ -1,13 +1,11 @@
-use teloxide::types::{CallbackQuery, UserId};
 use crate::oknoid::OknoId;
+use teloxide::types::{CallbackQuery, UserId};
 
 /// Requires CallbackQuery
 pub fn callback_filter(
-    id: impl AsRef<str> + Send + Sync + 'static
+    id: impl AsRef<str> + Send + Sync + 'static,
 ) -> impl Fn(CallbackQuery) -> bool + Send + Sync + 'static {
-    move |query: CallbackQuery| {
-        matches!(query.data, Some(query_id) if query_id == id.as_ref())
-    }
+    move |query: CallbackQuery| matches!(query.data, Some(query_id) if query_id == id.as_ref())
 }
 
 #[derive(Clone, Copy)]
@@ -18,12 +16,10 @@ pub enum Mention<'s> {
 
 impl<'s> Mention<'s> {
     pub fn parse(val: &'s str) -> Option<Self> {
-        if val.starts_with("@") {
-            Some(Mention::Username(&val[1..]))
+        if let Some(username) = val.strip_prefix("@") {
+            Some(Mention::Username(username))
         } else {
-            val.parse().ok()
-                .map(UserId)
-                .map(Mention::UserId)
+            val.parse().ok().map(UserId).map(Mention::UserId)
         }
     }
 

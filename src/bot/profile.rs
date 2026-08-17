@@ -1,62 +1,77 @@
-use std::borrow::Cow;
-use std::sync::Arc;
-use teloxide::Bot;
-use teloxide::prelude::{CallbackQuery, ChatId, Message, Requester, UserId};
-use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, User};
+use crate::{
+    bot::{
+        scheme::CANCEL_CALLBACK,
+        session::{Session, SessionState},
+        utils::Mention,
+    },
+    oknoid::{OknoId, UserInfo, UserRole},
+};
 use anyhow::{anyhow, bail};
 use log::error;
-use teloxide::payloads::SendMessageSetters;
-use crate::bot::scheme::CANCEL_CALLBACK;
-use crate::bot::session::{Session, SessionState};
-use crate::bot::utils::Mention;
-use crate::oknoid::{OknoId, UserInfo, UserRole};
+use std::{borrow::Cow, sync::Arc};
+use teloxide::{
+    Bot,
+    payloads::SendMessageSetters,
+    prelude::{CallbackQuery, ChatId, Message, Requester, UserId},
+    types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, User},
+};
 
-pub async fn usernames_inspect(
-    message: Message,
-    db: Arc<OknoId>
-) {
-    if let Some(User { id, username: Some(username), ..}) = message.from.as_ref() {
-        if let Err(err) = db.update_username(*id, username.clone()).await {
-            error!("Error while updating username: {:?}", err);
-        }
+pub async fn usernames_inspect(message: Message, db: Arc<OknoId>) {
+    if let Some(User {
+        id,
+        username: Some(username),
+        ..
+    }) = message.from.as_ref()
+        && let Err(err) = db.update_username(*id, username.clone()).await
+    {
+        error!("Error while updating username: {:?}", err);
     }
 }
 
-pub async fn on_start(
-    bot: Bot,
-    message: Message,
-    db: Arc<OknoId>,
-) -> anyhow::Result<()> {
-    let Some(User { id, username: Some(username), ..}) = message.from.as_ref() else {
+pub async fn on_start(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+    let Some(User {
+        id,
+        username: Some(username),
+        ..
+    }) = message.from.as_ref()
+    else {
         bail!("failed get user or username");
     };
 
-    if let Err(error) = db.register_user(*id, username.clone(), UserInfo::default()).await {
+    if let Err(error) = db
+        .register_user(*id, username.clone(), UserInfo::default())
+        .await
+    {
         error!("Error registering user: {:?}", error);
     };
 
-    bot.send_message(message.chat.id, "Используйте /bio для изменения описаня профиля.").await?;
+    bot.send_message(
+        message.chat.id,
+        "Используйте /bio для изменения описаня профиля.",
+    )
+    .await?;
     Ok(())
 }
 
-pub async fn on_bio(
-    bot: Bot,
-    session: Session,
-    message: Message
-) -> anyhow::Result<()> {
+pub async fn on_bio(bot: Bot, session: Session, message: Message) -> anyhow::Result<()> {
     if matches!(message.chat.kind, ChatKind::Private(..)) {
         session.update(SessionState::WaitBioMessage).await?;
 
-        bot.send_message(message.chat.id, "Отправьте описание для профиля следующим сообщением.")
-            .reply_markup(InlineKeyboardMarkup::new([[
-                InlineKeyboardButton::new(
-                    "Отмена",
-                    InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string())
-                )
-            ]]))
-            .await?;
+        bot.send_message(
+            message.chat.id,
+            "Отправьте описание для профиля следующим сообщением.",
+        )
+        .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
+            "Отмена",
+            InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string()),
+        )]]))
+        .await?;
     } else {
-        bot.send_message(message.chat.id, "Команда может быть использована только в личных сообщениях.").await?;
+        bot.send_message(
+            message.chat.id,
+            "Команда может быть использована только в личных сообщениях.",
+        )
+        .await?;
     }
 
     Ok(())
@@ -69,30 +84,31 @@ pub async fn on_bio_message(
     db: Arc<OknoId>,
 ) -> anyhow::Result<()> {
     let Some(text) = message.text() else {
-        bot.send_message(message.chat.id, "Отправьте сообщение с текстом!").await?;
+        bot.send_message(message.chat.id, "Отправьте сообщение с текстом!")
+            .await?;
         return Ok(());
     };
 
     if text.trim().is_empty() {
-        bot.send_message(message.chat.id, "Описание не может быть пустым! >:(").await?;
+        bot.send_message(message.chat.id, "Описание не может быть пустым! >:(")
+            .await?;
         return Ok(());
     }
 
-    let user = message.from.as_ref()
+    let user = message
+        .from
+        .as_ref()
         .ok_or(anyhow!("Failed to retrieve user"))?;
 
     db.set_bio(user.id, Some(text)).await?;
 
-    bot.send_message(message.chat.id, "Описание профиля обновлено!").await?;
+    bot.send_message(message.chat.id, "Описание профиля обновлено!")
+        .await?;
     session.exit().await?;
     Ok(())
 }
 
-pub async fn on_bio_cancel(
-    bot: Bot,
-    query: CallbackQuery,
-    session: Session
-) -> anyhow::Result<()> {
+pub async fn on_bio_cancel(bot: Bot, query: CallbackQuery, session: Session) -> anyhow::Result<()> {
     session.exit().await?;
     bot.send_message(session.chat_id(), "Отменено.").await?;
     bot.answer_callback_query(query.id).await?;
@@ -104,7 +120,7 @@ async fn send_profile(
     db: &OknoId,
     chat_id: ChatId,
     user_id: UserId,
-    username: &str
+    username: &str,
 ) -> anyhow::Result<()> {
     let info = db.get_user_info(user_id).await?;
     let text = if let Some(bio) = info.bio.as_ref() {
@@ -122,8 +138,7 @@ async fn send_profile(
             Роль: {}\n\
             Репутация: {}.\n\
             Нет описания.",
-            info.role,
-            info.reputation
+            info.role, info.reputation
         )
     };
     bot.send_message(chat_id, text).await?;
@@ -139,10 +154,10 @@ pub async fn on_info(
     async fn inner<'m>(mention: &'m str, db: &OknoId) -> Option<(UserId, Cow<'m, str>)> {
         let mention = Mention::parse(mention)?;
         Some(match mention {
-            Mention::Username(username) =>
-                (db.resolve_username(username)?, Cow::Borrowed(username)),
-            Mention::UserId(id) =>
-                (id, Cow::Owned(db.get_username(id)?))
+            Mention::Username(username) => {
+                (db.resolve_username(username)?, Cow::Borrowed(username))
+            }
+            Mention::UserId(id) => (id, Cow::Owned(db.get_username(id)?)),
         })
     }
 
@@ -157,12 +172,13 @@ pub async fn on_info(
     Ok(())
 }
 
-pub async fn on_me(
-    bot: Bot,
-    message: Message,
-    db: Arc<OknoId>,
-) -> anyhow::Result<()> {
-    let Some(User { id, username: Some(username), ..}) = message.from.as_ref() else {
+pub async fn on_me(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+    let Some(User {
+        id,
+        username: Some(username),
+        ..
+    }) = message.from.as_ref()
+    else {
         bail!("failed get user or username");
     };
 
@@ -177,7 +193,7 @@ async fn change_role_with_condition(
     role: UserRole,
     condition: impl FnOnce(UserRole) -> bool,
 ) -> anyhow::Result<bool> {
-    let Some(User { id: user_id , ..}) = message.from else {
+    let Some(User { id: user_id, .. }) = message.from else {
         bail!("Failed get user id");
     };
     if db.get_user_role(user_id).await? < UserRole::Admin {
@@ -187,12 +203,15 @@ async fn change_role_with_condition(
     }
 
     let Some(mention) = Mention::parse(mention) else {
-        bot.send_message(message.chat.id, "Нужно указывать id или @имя пользователя, зарегестрированного в боте")
-            .await?;
+        bot.send_message(
+            message.chat.id,
+            "Нужно указывать id или @имя пользователя, зарегестрированного в боте",
+        )
+        .await?;
         return Ok(false);
     };
 
-    let Some(target_id) = mention.resolve(&db) else {
+    let Some(target_id) = mention.resolve(db) else {
         bot.send_message(message.chat.id, "Неизвестный пользователь")
             .await?;
         return Ok(false);
@@ -204,8 +223,11 @@ async fn change_role_with_condition(
     if proceed {
         db.set_user_role(target_id, role).await?;
     } else {
-        bot.send_message(message.chat.id, format!("Пользователь имеет роль: {current_role}"))
-            .await?;
+        bot.send_message(
+            message.chat.id,
+            format!("Пользователь имеет роль: {current_role}"),
+        )
+        .await?;
     }
 
     Ok(proceed)
@@ -217,8 +239,10 @@ pub async fn add_admin(
     db: Arc<OknoId>,
     mention: String,
 ) -> anyhow::Result<()> {
-    if change_role_with_condition(&bot, &db, &message, &mention, UserRole::Admin, |r| r < UserRole::Admin)
-        .await?
+    if change_role_with_condition(&bot, &db, &message, &mention, UserRole::Admin, |r| {
+        r < UserRole::Admin
+    })
+    .await?
     {
         bot.send_message(message.chat.id, "Пользователь назначен админом.")
             .await?;
@@ -233,8 +257,10 @@ pub async fn del_admin(
     db: Arc<OknoId>,
     mention: String,
 ) -> anyhow::Result<()> {
-    if change_role_with_condition(&bot, &db, &message, &mention, UserRole::Standard, |r| r == UserRole::Admin)
-        .await?
+    if change_role_with_condition(&bot, &db, &message, &mention, UserRole::Standard, |r| {
+        r == UserRole::Admin
+    })
+    .await?
     {
         bot.send_message(message.chat.id, "Пользователь более не является админом.")
             .await?;
@@ -249,7 +275,7 @@ pub async fn change_rep(
     db: Arc<OknoId>,
     (mention, value): (String, i64),
 ) -> anyhow::Result<()> {
-    let Some(User { id: user_id , ..}) = message.from else {
+    let Some(User { id: user_id, .. }) = message.from else {
         bail!("Failed get user id");
     };
     if db.get_user_role(user_id).await? < UserRole::Admin {
@@ -259,8 +285,11 @@ pub async fn change_rep(
     }
 
     let Some(mention) = Mention::parse(mention.as_str()) else {
-        bot.send_message(message.chat.id, "Нужно указывать id или @имя пользователя, зарегестрированного в боте")
-            .await?;
+        bot.send_message(
+            message.chat.id,
+            "Нужно указывать id или @имя пользователя, зарегестрированного в боте",
+        )
+        .await?;
         return Ok(());
     };
 
@@ -272,9 +301,8 @@ pub async fn change_rep(
 
     let new_rep = db.add_reputation(target_id, value).await?;
 
-    bot.send_message(message.chat.id,
-        format!("Обновленная репутация: {new_rep}")
-    ).await?;
+    bot.send_message(message.chat.id, format!("Обновленная репутация: {new_rep}"))
+        .await?;
 
     Ok(())
 }

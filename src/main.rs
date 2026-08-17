@@ -1,16 +1,12 @@
+mod bot;
 mod config;
 mod oknoid;
-mod bot;
 
+use crate::{config::Config, oknoid::OknoId};
+use bot::{scheme::scheme, session::SessionState};
+use log::{LevelFilter, info};
 use std::sync::Arc;
-use log::{info, LevelFilter};
-use teloxide::prelude::*;
-use teloxide::dispatching::dialogue::InMemStorage;
-use crate::config::Config;
-use crate::oknoid::OknoId;
-use bot::scheme::scheme;
-use bot::session::SessionState;
-use bot::support::*;
+use teloxide::{dispatching::dialogue::InMemStorage, prelude::*};
 
 #[tokio::main]
 async fn main() {
