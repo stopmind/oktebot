@@ -50,6 +50,8 @@ def remove():
         os.remove("/usr/local/bin/oktebot")
     with contextlib.suppress(FileNotFoundError):
         os.remove("/usr/local/bin/oktebot-manage")
+    with contextlib.suppress(FileNotFoundError):
+        os.remove("/var/oktebot-tag")
 
 if len(argv) != 2:
     help()
