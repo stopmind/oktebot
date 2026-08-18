@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    oknoid::IdError::{DbError, InvalidRole, UserExists, UserNotFound},
+    oknoid::IdError::{InvalidRole, UserExists, UserNotFound},
 };
 use log::info;
 use sqlx::{Error, SqlitePool, sqlite::SqliteConnectOptions};

@@ -1,14 +1,16 @@
 use crate::{
     bot::{
+        args::{Mention, get_args},
+        invalid_usage_message,
         scheme::CANCEL_CALLBACK,
         session::{Session, SessionState},
-        utils::Mention,
     },
     oknoid::{OknoId, UserInfo, UserRole},
+    parser,
 };
 use anyhow::{anyhow, bail};
 use log::error;
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 use teloxide::{
     Bot,
     payloads::SendMessageSetters,
@@ -151,28 +153,22 @@ async fn send_profile(
     Ok(())
 }
 
-pub async fn on_info(
-    bot: Bot,
-    message: Message,
-    mention: String,
-    db: Arc<OknoId>,
-) -> anyhow::Result<()> {
-    async fn inner<'m>(mention: &'m str, db: &OknoId) -> Option<(UserId, Cow<'m, str>)> {
-        let mention = Mention::parse(mention)?;
-        Some(match mention {
-            Mention::Username(username) => {
-                (db.resolve_username(username)?, Cow::Borrowed(username))
-            }
-            Mention::UserId(id) => (id, Cow::Owned(db.get_username(id)?)),
-        })
-    }
+pub async fn on_info(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+    let args = get_args(&message);
+    if let Some(mention) = parser![Mention](args) {
+        let info = match mention {
+            Mention::Username(username) => (db.resolve_username(&username), Some(username)),
+            Mention::UserId(id) => (Some(id), db.get_username(id)),
+        };
 
-    if let Some((id, username)) = inner(&mention, &db).await {
-        send_profile(&bot, &db, message.chat.id, id, username.as_ref()).await?;
+        if let (Some(id), Some(username)) = info {
+            send_profile(&bot, &db, message.chat.id, id, username.as_ref()).await?;
+        } else {
+            bot.send_message(message.chat.id, "Пользователь не найден")
+                .await?;
+        }
     } else {
-        bot.send_message(message.chat.id,
-            "Пользователь не найден. Нужно указывать id или @имя пользователя, зарегестрированного в боте"
-        ).await?;
+        invalid_usage_message(&bot, message.chat.id).await?;
     }
 
     Ok(())
@@ -195,7 +191,7 @@ async fn change_role_with_condition(
     bot: &Bot,
     db: &OknoId,
     message: &Message,
-    mention: &str,
+    mention: Mention,
     role: UserRole,
     condition: impl FnOnce(UserRole) -> bool,
 ) -> anyhow::Result<bool> {
@@ -207,15 +203,6 @@ async fn change_role_with_condition(
             .await?;
         return Ok(false);
     }
-
-    let Some(mention) = Mention::parse(mention) else {
-        bot.send_message(
-            message.chat.id,
-            "Нужно указывать id или @имя пользователя, зарегестрированного в боте",
-        )
-        .await?;
-        return Ok(false);
-    };
 
     let Some(target_id) = mention.resolve(db) else {
         bot.send_message(message.chat.id, "Неизвестный пользователь")
@@ -239,76 +226,67 @@ async fn change_role_with_condition(
     Ok(proceed)
 }
 
-pub async fn add_admin(
-    bot: Bot,
-    message: Message,
-    db: Arc<OknoId>,
-    mention: String,
-) -> anyhow::Result<()> {
-    if change_role_with_condition(&bot, &db, &message, &mention, UserRole::Admin, |r| {
-        r < UserRole::Admin
-    })
-    .await?
-    {
-        bot.send_message(message.chat.id, "Пользователь назначен админом.")
-            .await?;
+pub async fn add_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+    let args = get_args(&message);
+    if let Some(mention) = parser![Mention](args) {
+        if change_role_with_condition(&bot, &db, &message, mention, UserRole::Admin, |r| {
+            r < UserRole::Admin
+        })
+        .await?
+        {
+            bot.send_message(message.chat.id, "Пользователь назначен админом.")
+                .await?;
+        }
+    } else {
+        invalid_usage_message(&bot, message.chat.id).await?;
+    }
+    Ok(())
+}
+
+pub async fn del_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+    let args = get_args(&message);
+    if let Some(mention) = parser![Mention](args) {
+        if change_role_with_condition(&bot, &db, &message, mention, UserRole::Standard, |r| {
+            r == UserRole::Admin
+        })
+        .await?
+        {
+            bot.send_message(message.chat.id, "Пользователь назначен админом.")
+                .await?;
+        }
+    } else {
+        invalid_usage_message(&bot, message.chat.id).await?;
     }
 
     Ok(())
 }
 
-pub async fn del_admin(
-    bot: Bot,
-    message: Message,
-    db: Arc<OknoId>,
-    mention: String,
-) -> anyhow::Result<()> {
-    if change_role_with_condition(&bot, &db, &message, &mention, UserRole::Standard, |r| {
-        r == UserRole::Admin
-    })
-    .await?
-    {
-        bot.send_message(message.chat.id, "Пользователь более не является админом.")
-            .await?;
-    }
-
-    Ok(())
-}
-
-pub async fn change_rep(
-    bot: Bot,
-    message: Message,
-    db: Arc<OknoId>,
-    (mention, value): (String, i64),
-) -> anyhow::Result<()> {
+pub async fn change_rep(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
     let Some(User { id: user_id, .. }) = message.from else {
         bail!("Failed get user id");
     };
+
     if db.get_user_role(user_id).await? < UserRole::Admin {
         bot.send_message(message.chat.id, "У вас недостаточно прав")
             .await?;
         return Ok(());
     }
 
-    let Some(mention) = Mention::parse(mention.as_str()) else {
-        bot.send_message(
-            message.chat.id,
-            "Нужно указывать id или @имя пользователя, зарегестрированного в боте",
-        )
-        .await?;
-        return Ok(());
-    };
+    let args = get_args(&message);
+    if let Some((mention, value)) = parser![Mention, i64](args) {
+        let Some(target_id) = mention.resolve(&db) else {
+            bot.send_message(message.chat.id, "Неизвестный пользователь")
+                .await?;
+            return Ok(());
+        };
 
-    let Some(target_id) = mention.resolve(&db) else {
-        bot.send_message(message.chat.id, "Неизвестный пользователь")
+        let new_rep = db.add_reputation(target_id, value).await?;
+
+        bot.send_message(message.chat.id, format!("Обновленная репутация: {new_rep}"))
             .await?;
-        return Ok(());
-    };
-
-    let new_rep = db.add_reputation(target_id, value).await?;
-
-    bot.send_message(message.chat.id, format!("Обновленная репутация: {new_rep}"))
-        .await?;
+    } else {
+        invalid_usage_message(&bot, message.chat.id).await?;
+    }
 
     Ok(())
 }

@@ -8,9 +8,8 @@ pub enum Command {
     Support,
     Bio,
     Me,
-    Info(String),
-    AdminAdd(String),
-    AdminDel(String),
-    #[command(parse_with = "split")]
-    Rep(String, i64),
+    Info,
+    AdminAdd,
+    AdminDel,
+    Rep,
 }
