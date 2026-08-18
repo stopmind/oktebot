@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+if [ $# -ne 1 ]; then
+    echo "Usage: release <release name>"
+    exit 1
+fi
+
+cargo build --profile release
+git tag $1
+git push origin --tags
+gh release new $1 --notes-from-tag --notes-start-tag -t $1 ./target/release/oktebot
+echo "Published new release"

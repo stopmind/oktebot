@@ -1,0 +1,67 @@
+#!/usr/bin/python
+
+from sys import argv
+import requests
+import os
+import contextlib
+
+def help():
+    print("Usage: oktebot-manage <command>")
+    print("  update - check for updates")
+    print("  remove - remove oktebot, not removes config and storage")
+
+def download(url, dst):
+    response = requests.get(url)
+    response.raise_for_status()
+    with open(dst, "wb") as file:
+        file.write(response.content)
+
+def update():
+    try:
+        latest = requests.get("https://api.github.com/repos/stopmind/oktebot/releases/latest").json()
+        latest_tag = latest["tag_name"]
+        assets = latest["assets"]
+    except Exception as e:
+        print(f"Failed to get latest release: {e}")
+        exit(1)
+
+    with open("/var/oktebot-tag", "a+") as save:
+        current_tag = save.readline()
+        if current_tag != latest_tag:
+            try:
+                download("https://raw.githubusercontent.com/stopmind/oktebot/refs/heads/master/scripts/oktebot-manage", "/usr/local/bin/oktebot-manage")
+                for asset in assets:
+                    if asset["name"] == "oktebot":
+                        download(asset["browser_download_url"], "/usr/local/bin/oktebot")
+                        os.chmod("/usr/local/bin/oktebot", 0o777)
+
+                save.truncate()
+                save.write(latest_tag)
+            except Exception as e:
+                print(f"Failed to download release: {e}")
+                exit(1)
+
+            print(f"Updated successfully")
+        else:
+            print("Newer version not found")
+
+def remove():
+    with contextlib.suppress(FileNotFoundError):
+        os.remove("/usr/local/bin/oktebot")
+    with contextlib.suppress(FileNotFoundError):
+        os.remove("/usr/local/bin/oktebot-manage")
+
+if len(argv) != 2:
+    help()
+    exit(1)
+
+match argv[1]:
+    case "help":
+        help()
+    case "update":
+        update()
+    case "remove":
+        remove()
+    case _:
+        help()
+        exit(1)

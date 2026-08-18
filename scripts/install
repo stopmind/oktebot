@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+
+sudo curl -o /usr/local/bin/oktebot-manage https://raw.githubusercontent.com/stopmind/oktebot/refs/heads/master/scripts/oktebot-manage
+sudo chmod +x /usr/local/bin/oktebot-manage
+sudo oktebot-manage update
