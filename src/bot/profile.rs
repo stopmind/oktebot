@@ -100,12 +100,18 @@ pub async fn on_bio_message(
         .as_ref()
         .ok_or(anyhow!("Failed to retrieve user"))?;
 
-    db.set_bio(user.id, Some(text)).await?;
-
-    bot.send_message(message.chat.id, "Описание профиля обновлено!")
-        .await?;
     session.exit().await?;
-    Ok(())
+
+    let result = db.set_bio(user.id, Some(text)).await;
+    if let Err(error) = result {
+        bot.send_message(message.chat.id, "Не удалось изменить описание.")
+            .await?;
+        Err(error.into())
+    } else {
+        bot.send_message(message.chat.id, "Описание профиля обновлено.")
+            .await?;
+        Ok(())
+    }
 }
 
 pub async fn on_bio_cancel(bot: Bot, query: CallbackQuery, session: Session) -> anyhow::Result<()> {

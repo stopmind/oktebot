@@ -7,7 +7,6 @@ pub enum Command {
     Help,
     Support,
     Bio,
-    #[command(alias = "/info")]
     Me,
     Info(String),
     AdminAdd(String),

@@ -1,16 +1,44 @@
-use crate::config::Config;
-use anyhow::{Result, anyhow};
+use crate::{
+    config::Config,
+    oknoid::IdError::{DbError, InvalidRole, UserExists, UserNotFound},
+};
 use log::info;
-use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
+use sqlx::{Error, SqlitePool, sqlite::SqliteConnectOptions};
 use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
-    fs,
+    fs, io,
     ops::DerefMut,
     path::Path,
     sync::{Arc, Mutex},
 };
 use teloxide::prelude::*;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum IdError {
+    #[error("db error: {0}")]
+    DbError(#[from] sqlx::Error),
+    #[error("db initialization failed due io error: {0}")]
+    InitIoError(io::Error),
+    #[error("user already exists: {0}")]
+    UserExists(UserId),
+    #[error("user not found: {0}")]
+    UserNotFound(UserId),
+    #[error("invalid role id: {0}")]
+    InvalidRole(i64),
+}
+
+impl IdError {
+    fn map_user_not_found(err: sqlx::Error, id: UserId) -> Self {
+        match err {
+            Error::RowNotFound => UserNotFound(id),
+            err => err.into(),
+        }
+    }
+}
+
+type IdResult<T> = Result<T, IdError>;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Default)]
 pub enum UserRole {
@@ -69,9 +97,9 @@ pub struct OknoId {
 }
 
 impl OknoId {
-    pub async fn open(path: impl AsRef<Path>, config: Arc<Config>) -> Result<Self> {
+    pub async fn open(path: impl AsRef<Path>, config: Arc<Config>) -> IdResult<Self> {
         let path = path.as_ref();
-        let do_initialize = !fs::exists(path)?;
+        let do_initialize = !fs::exists(path).map_err(IdError::InitIoError)?;
 
         let pool = SqlitePool::connect_with(
             SqliteConnectOptions::new()
@@ -110,7 +138,7 @@ impl OknoId {
         })
     }
 
-    async fn initialize(pool: &SqlitePool) -> Result<()> {
+    async fn initialize(pool: &SqlitePool) -> IdResult<()> {
         sqlx::raw_sql(
             "
             CREATE TABLE users ( \
@@ -132,14 +160,16 @@ impl OknoId {
 }
 
 impl OknoId {
-    pub async fn register_user(&self, id: UserId, username: String, info: UserInfo) -> Result<()> {
+    pub async fn register_user(
+        &self,
+        id: UserId,
+        username: String,
+        info: UserInfo,
+    ) -> IdResult<()> {
         {
-            let mut usernames = self
-                .usernames
-                .lock()
-                .map_err(|_| anyhow!("Failed to lock usernames!"))?;
+            let mut usernames = self.usernames.lock().unwrap();
             if usernames.id_to_username.contains_key(&id) {
-                return Err(anyhow!("User already exists"));
+                return Err(UserExists(id));
             }
 
             usernames.id_to_username.insert(id, username.clone());
@@ -159,12 +189,9 @@ impl OknoId {
         Ok(())
     }
 
-    pub async fn update_username(&self, user_id: UserId, username: String) -> Result<()> {
+    pub async fn update_username(&self, user_id: UserId, username: String) -> IdResult<()> {
         let query = {
-            let mut guard = self
-                .usernames
-                .lock()
-                .map_err(|_| anyhow!("Failed to lock usernames!"))?;
+            let mut guard = self.usernames.lock().unwrap();
 
             let usernames = guard.deref_mut();
 
@@ -211,25 +238,30 @@ impl OknoId {
             .cloned()
     }
 
-    pub async fn set_bio(&self, id: UserId, bio: Option<&str>) -> Result<()> {
-        sqlx::query("UPDATE users SET bio = ? WHERE id = ?")
+    pub async fn set_bio(&self, id: UserId, bio: Option<&str>) -> IdResult<()> {
+        let affected = sqlx::query("UPDATE users SET bio = ? WHERE id = ?")
             .bind(bio)
             .bind(id.0 as i64)
             .execute(&self.pool)
-            .await?;
+            .await?
+            .rows_affected();
 
-        Ok(())
+        if affected == 0 {
+            Err(UserNotFound(id))
+        } else {
+            Ok(())
+        }
     }
 
-    pub async fn get_user_info(&self, id: UserId) -> Result<UserInfo> {
+    pub async fn get_user_info(&self, id: UserId) -> IdResult<UserInfo> {
         let (role, reputation, bio): (_, _, Option<String>) =
             sqlx::query_as("SELECT role, reputation, bio FROM users WHERE id = ?")
                 .bind(id.0 as i64)
                 .fetch_one(&self.pool)
-                .await?;
+                .await
+                .map_err(|e| IdError::map_user_not_found(e, id))?;
 
-        let mut role =
-            UserRole::from_db(role).ok_or_else(|| anyhow!("Invalid user role ID: {}", role))?;
+        let mut role = UserRole::from_db(role).ok_or_else(|| InvalidRole(role))?;
 
         if self.config.super_admins.contains(&id) {
             role = UserRole::SuperAdmin;
@@ -242,7 +274,7 @@ impl OknoId {
         })
     }
 
-    pub async fn get_user_role(&self, id: UserId) -> Result<UserRole> {
+    pub async fn get_user_role(&self, id: UserId) -> IdResult<UserRole> {
         if self.config.super_admins.contains(&id) {
             return Ok(UserRole::SuperAdmin);
         }
@@ -250,19 +282,25 @@ impl OknoId {
         let (role,) = sqlx::query_as("SELECT role FROM users WHERE id = ?")
             .bind(id.0 as i64)
             .fetch_one(&self.pool)
-            .await?;
+            .await
+            .map_err(|e| IdError::map_user_not_found(e, id))?;
 
-        UserRole::from_db(role).ok_or_else(|| anyhow!("Invalid user role ID: {}", role))
+        UserRole::from_db(role).ok_or_else(|| InvalidRole(role))
     }
 
-    pub async fn set_user_role(&self, id: UserId, role: UserRole) -> Result<()> {
-        sqlx::query("UPDATE users SET role = ? WHERE id = ?")
+    pub async fn set_user_role(&self, id: UserId, role: UserRole) -> IdResult<()> {
+        let affected = sqlx::query("UPDATE users SET role = ? WHERE id = ?")
             .bind(role.to_db())
             .bind(id.0 as i64)
             .execute(&self.pool)
-            .await?;
+            .await?
+            .rows_affected();
 
-        Ok(())
+        if affected == 0 {
+            Err(UserNotFound(id))
+        } else {
+            Ok(())
+        }
     }
 
     #[allow(dead_code)]
@@ -270,8 +308,8 @@ impl OknoId {
         self.config.super_admins.contains(&id)
     }
 
-    pub async fn add_reputation(&self, id: UserId, val: i64) -> Result<i64> {
-        Ok(sqlx::query_as::<'_, _, (i64,)>(
+    pub async fn add_reputation(&self, id: UserId, val: i64) -> IdResult<i64> {
+        let result = sqlx::query_as::<'_, _, (i64,)>(
             "\
                 UPDATE users \
                 SET reputation = reputation + ? \
@@ -282,7 +320,9 @@ impl OknoId {
         .bind(val)
         .bind(id.0 as i64)
         .fetch_one(&self.pool)
-        .await?
-        .0)
+        .await
+        .map_err(|e| IdError::map_user_not_found(e, id))?;
+
+        Ok(result.0)
     }
 }
