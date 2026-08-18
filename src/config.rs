@@ -1,16 +1,36 @@
-use anyhow::Result;
 use serde::Deserialize;
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+};
 use teloxide::types::{ChatId, UserId};
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum ConfigLoadError {
+    #[error("failed read config: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("config parsing error: {0}")]
+    Parse(#[from] toml::de::Error),
+}
 
 #[derive(Deserialize)]
 pub struct Config {
     pub token: String,
-    pub super_admins: BTreeSet<UserId>,
     pub support_chat: ChatId,
+    #[serde(default)]
+    pub super_admins: BTreeSet<UserId>,
+    #[serde(default = "default_storage_path")]
+    pub storage: PathBuf,
 }
+
+fn default_storage_path() -> PathBuf {
+    "/var/oktebot".into()
+}
+
 impl Config {
-    pub fn read(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn read(path: impl AsRef<Path>) -> Result<Self, ConfigLoadError> {
         Ok(toml::from_str(fs::read_to_string(path)?.as_str())?)
     }
 }

@@ -9,7 +9,6 @@ use std::{
     fmt::{Display, Formatter},
     fs, io,
     ops::DerefMut,
-    path::Path,
     sync::{Arc, Mutex},
 };
 use teloxide::prelude::*;
@@ -97,9 +96,9 @@ pub struct OknoId {
 }
 
 impl OknoId {
-    pub async fn open(path: impl AsRef<Path>, config: Arc<Config>) -> IdResult<Self> {
-        let path = path.as_ref();
-        let do_initialize = !fs::exists(path).map_err(IdError::InitIoError)?;
+    pub async fn open(config: Arc<Config>) -> IdResult<Self> {
+        let path = config.storage.join("id.db");
+        let do_initialize = !fs::exists(&path).map_err(IdError::InitIoError)?;
 
         let pool = SqlitePool::connect_with(
             SqliteConnectOptions::new()
