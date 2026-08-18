@@ -2,7 +2,7 @@ use crate::{
     bot::{
         args::{Mention, get_args},
         invalid_usage_message,
-        scheme::CANCEL_CALLBACK,
+        scheme::{BIO_CALLBACK, CANCEL_CALLBACK, HELP_CALLBACK, PROFILE_CALLBACK_PREFIX},
         session::{Session, SessionState},
     },
     oknoid::{OknoId, UserInfo, UserRole},
@@ -47,11 +47,18 @@ pub async fn on_start(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Re
         error!("Error registering user: {:?}", error);
     };
 
-    bot.send_message(
-        message.chat.id,
-        "Используйте /bio для изменения описаня профиля.",
-    )
-    .await?;
+    bot.send_message(message.chat.id, "Вы зарегестрированы.")
+        .reply_markup(InlineKeyboardMarkup::new([
+            [InlineKeyboardButton::new(
+                "Добавить описание",
+                InlineKeyboardButtonKind::CallbackData(BIO_CALLBACK.to_owned()),
+            )],
+            [InlineKeyboardButton::new(
+                "Справка",
+                InlineKeyboardButtonKind::CallbackData(HELP_CALLBACK.to_owned()),
+            )],
+        ]))
+        .await?;
     Ok(())
 }
 
@@ -76,6 +83,39 @@ pub async fn on_bio(bot: Bot, session: Session, message: Message) -> anyhow::Res
         .await?;
     }
 
+    Ok(())
+}
+
+pub async fn on_bio_callback(
+    bot: Bot,
+    session: Session,
+    callback: CallbackQuery,
+) -> anyhow::Result<()> {
+    let Some(message) = callback.regular_message() else {
+        bail!("callback message not found");
+    };
+
+    if matches!(message.chat.kind, ChatKind::Private(..)) {
+        session.update(SessionState::WaitBioMessage).await?;
+
+        bot.send_message(
+            message.chat.id,
+            "Отправьте описание для профиля сообщением.",
+        )
+        .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
+            "Отмена",
+            InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string()),
+        )]]))
+        .await?;
+    } else {
+        bot.send_message(
+            message.chat.id,
+            "Команда может быть использована только в личных сообщениях.",
+        )
+        .await?;
+    }
+
+    bot.answer_callback_query(callback.id).await?;
     Ok(())
 }
 
@@ -185,6 +225,35 @@ pub async fn on_me(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Resul
     };
 
     send_profile(&bot, &db, message.chat.id, *id, username.as_str()).await
+}
+
+pub async fn on_profile_callback(
+    bot: Bot,
+    db: Arc<OknoId>,
+    callback: CallbackQuery,
+) -> anyhow::Result<()> {
+    let message = callback
+        .regular_message()
+        .ok_or_else(|| anyhow!("callback message not found"))?;
+
+    let callback_data = callback
+        .data
+        .as_ref()
+        .ok_or_else(|| anyhow!("callback not found"))?;
+
+    let id = callback_data[PROFILE_CALLBACK_PREFIX.len()..]
+        .parse()
+        .map_err(|_| anyhow!("failed to parse callback data: {}", callback_data))
+        .map(UserId)?;
+
+    let username = db
+        .get_username(id)
+        .ok_or_else(|| anyhow!("username not found, user_id: {id}"))?;
+
+    send_profile(&bot, &db, message.chat.id, id, username.as_str()).await?;
+    bot.answer_callback_query(callback.id).await?;
+
+    Ok(())
 }
 
 async fn change_role_with_condition(

@@ -2,8 +2,8 @@ use crate::bot::{
     command::Command,
     on_help_callback, on_help_command,
     profile::{
-        add_admin, change_rep, del_admin, on_bio, on_bio_cancel, on_bio_message, on_info, on_me,
-        on_start, usernames_inspect,
+        add_admin, change_rep, del_admin, on_bio, on_bio_callback, on_bio_cancel, on_bio_message,
+        on_info, on_me, on_profile_callback, on_start, usernames_inspect,
     },
     session::SessionState,
     support::*,
@@ -18,6 +18,8 @@ use teloxide::{
 
 pub const CANCEL_CALLBACK: &str = "cancel";
 pub const HELP_CALLBACK: &str = "help";
+pub const BIO_CALLBACK: &str = "bio";
+pub const PROFILE_CALLBACK_PREFIX: &str = "profile";
 
 pub fn scheme() -> UpdateHandler<anyhow::Error> {
     dialogue::enter::<Update, InMemStorage<SessionState>, SessionState, _>()
@@ -46,6 +48,11 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         .branch(case![SessionState::WaitSupportMessage].endpoint(on_support_cancel))
                         .branch(case![SessionState::WaitBioMessage].endpoint(on_bio_cancel)),
                 )
-                .branch(filter(utils::callback_filter(HELP_CALLBACK)).endpoint(on_help_callback)),
+                .branch(filter(utils::callback_filter(HELP_CALLBACK)).endpoint(on_help_callback))
+                .branch(filter(utils::callback_filter(BIO_CALLBACK)).endpoint(on_bio_callback))
+                .branch(
+                    filter(utils::callback_prefix_filter(PROFILE_CALLBACK_PREFIX))
+                        .endpoint(on_profile_callback),
+                ),
         )
 }

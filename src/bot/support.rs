@@ -1,12 +1,11 @@
 use crate::{
     bot::{
-        scheme::CANCEL_CALLBACK,
+        scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX},
         session::{Session, SessionState},
     },
     config::Config,
 };
-use anyhow::Result;
-use log::info;
+use anyhow::{Result, bail};
 use std::sync::Arc;
 use teloxide::{
     prelude::{Message, *},
@@ -42,18 +41,19 @@ pub async fn on_support_message(
 ) -> Result<()> {
     session.exit().await?;
 
-    info!(
-        "Received support message from: {} text: {}",
-        message
-            .from
-            .as_ref()
-            .and_then(|from| from.username.as_ref())
-            .map(String::as_str)
-            .unwrap_or("unknown"),
-        message.text().unwrap_or("none")
-    );
+    let Some(user) = message.from else {
+        bail!("failed get user")
+    };
+
+    let callback = format!("{PROFILE_CALLBACK_PREFIX}{}", user.id);
 
     bot.forward_message(config.support_chat, message.chat.id, message.id)
+        .await?;
+    bot.send_message(config.support_chat, "===============")
+        .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
+            "Описание профиля",
+            InlineKeyboardButtonKind::CallbackData(callback),
+        )]]))
         .await?;
     bot.send_message(message.chat.id, "Сообщение отправлено!")
         .await?;
