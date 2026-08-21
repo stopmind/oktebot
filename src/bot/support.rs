@@ -1,26 +1,32 @@
 use crate::{
     bot::{
-        scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX},
+        scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX, SUPPORT_SELECTED_CALLBACK_PREFIX},
         session::{Session, SessionState},
     },
     config::Config,
 };
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use std::sync::Arc;
 use teloxide::{
     prelude::{Message, *},
     types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup},
 };
 
-pub async fn on_support(bot: Bot, session: Session, message: Message) -> Result<()> {
+pub async fn on_support(bot: Bot, message: Message, config: Arc<Config>) -> Result<()> {
     if matches!(message.chat.kind, ChatKind::Private(..)) {
-        session.update(SessionState::WaitSupportMessage).await?;
-
-        bot.send_message(message.chat.id, "Отправьте сообщение для тех. поддержки.")
-            .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-                "Отмена",
-                InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string()),
-            )]]))
+        bot.send_message(message.chat.id, "Выберите категорию: ")
+            .reply_markup(InlineKeyboardMarkup::new(
+                config.support_categories_layout.iter().map(|row| {
+                    row.iter().map(|i| {
+                        InlineKeyboardButton::new(
+                            config.support_categories[*i].as_ref().clone(),
+                            InlineKeyboardButtonKind::CallbackData(format!(
+                                "{SUPPORT_SELECTED_CALLBACK_PREFIX}{i}"
+                            )),
+                        )
+                    })
+                }),
+            ))
             .await?;
     } else {
         bot.send_message(
@@ -33,11 +39,50 @@ pub async fn on_support(bot: Bot, session: Session, message: Message) -> Result<
     Ok(())
 }
 
+pub async fn on_support_selected_callback(
+    bot: Bot,
+    callback: CallbackQuery,
+    session: Session,
+    config: Arc<Config>,
+) -> Result<()> {
+    let message = callback
+        .regular_message()
+        .ok_or_else(|| anyhow!("callback message not found"))?;
+
+    let callback_data = callback
+        .data
+        .as_ref()
+        .ok_or_else(|| anyhow!("callback not found"))?;
+
+    let idx: usize = callback_data[SUPPORT_SELECTED_CALLBACK_PREFIX.len()..]
+        .parse()
+        .map_err(|_| anyhow!("failed to parse callback data: {}", callback_data))?;
+
+    let category = config
+        .support_categories
+        .get(idx)
+        .ok_or_else(|| anyhow!("support category not found"))?
+        .clone();
+
+    session
+        .update(SessionState::WaitSupportMessage { category })
+        .await?;
+    bot.send_message(message.chat.id, "Отправьте сообщение для тех. поддержки.")
+        .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
+            "Отмена",
+            InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string()),
+        )]]))
+        .await?;
+    bot.answer_callback_query(callback.id).await?;
+    Ok(())
+}
+
 pub async fn on_support_message(
     bot: Bot,
     session: Session,
     message: Message,
     config: Arc<Config>,
+    category: Arc<String>,
 ) -> Result<()> {
     session.exit().await?;
 
@@ -49,7 +94,7 @@ pub async fn on_support_message(
 
     bot.forward_message(config.support_chat, message.chat.id, message.id)
         .await?;
-    bot.send_message(config.support_chat, "===============")
+    bot.send_message(config.support_chat, format!("Категория: {category}"))
         .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
             "Описание профиля",
             InlineKeyboardButtonKind::CallbackData(callback),

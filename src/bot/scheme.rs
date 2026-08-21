@@ -20,6 +20,7 @@ pub const CANCEL_CALLBACK: &str = "cancel";
 pub const HELP_CALLBACK: &str = "help";
 pub const BIO_CALLBACK: &str = "bio";
 pub const PROFILE_CALLBACK_PREFIX: &str = "profile";
+pub const SUPPORT_SELECTED_CALLBACK_PREFIX: &str = "support-selected";
 
 pub fn scheme() -> UpdateHandler<anyhow::Error> {
     dialogue::enter::<Update, InMemStorage<SessionState>, SessionState, _>()
@@ -38,14 +39,20 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         .branch(case![Command::AdminDel].endpoint(del_admin))
                         .branch(case![Command::Rep].endpoint(change_rep)),
                 )
-                .branch(case![SessionState::WaitSupportMessage].endpoint(on_support_message))
+                .branch(
+                    case![SessionState::WaitSupportMessage { category }]
+                        .endpoint(on_support_message),
+                )
                 .branch(case![SessionState::WaitBioMessage].endpoint(on_bio_message)),
         )
         .branch(
             Update::filter_callback_query()
                 .branch(
                     filter(utils::callback_filter(CANCEL_CALLBACK))
-                        .branch(case![SessionState::WaitSupportMessage].endpoint(on_support_cancel))
+                        .branch(
+                            case![SessionState::WaitSupportMessage { category }]
+                                .endpoint(on_support_cancel),
+                        )
                         .branch(case![SessionState::WaitBioMessage].endpoint(on_bio_cancel)),
                 )
                 .branch(filter(utils::callback_filter(HELP_CALLBACK)).endpoint(on_help_callback))
@@ -53,6 +60,12 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                 .branch(
                     filter(utils::callback_prefix_filter(PROFILE_CALLBACK_PREFIX))
                         .endpoint(on_profile_callback),
+                )
+                .branch(
+                    filter(utils::callback_prefix_filter(
+                        SUPPORT_SELECTED_CALLBACK_PREFIX,
+                    ))
+                    .endpoint(on_support_selected_callback),
                 ),
         )
 }
