@@ -1,7 +1,4 @@
-use crate::{
-    bot::scheme::HELP_CALLBACK,
-    oknoid::{OknoId, UserRole},
-};
+use crate::{bot::scheme::HELP_CALLBACK, oknoid::OknoId};
 use anyhow::bail;
 use std::sync::Arc;
 use teloxide::{
@@ -35,8 +32,12 @@ pub async fn invalid_usage_message(bot: &Bot, chat_id: ChatId) -> Result<(), Req
 pub async fn send_help_message(
     bot: &Bot,
     chat_id: ChatId,
-    role: UserRole,
-) -> Result<(), RequestError> {
+    db: &OknoId,
+    user_id: UserId,
+) -> anyhow::Result<()> {
+    let is_superadmin = db.is_super_admin(user_id);
+    let is_admin = db.check_user_privileges(user_id).await?;
+
     let mut text = "\
         <b>Общая информация:</b>\n\
         Для регистрации нужно прописать /start в личных сообщениях.\n\
@@ -51,14 +52,14 @@ pub async fn send_help_message(
     "
     .to_owned();
 
-    if role >= UserRole::Admin {
+    if is_admin {
         text.push_str("\n\
             <b>Команды админов:</b>\n\
             /rep <code>&lt;пользователь&gt;</code> <code>&lt;значение&gt;</code> - изменить репутацию пользователя на указанное значение.\n\
         ");
     }
 
-    if role == UserRole::SuperAdmin {
+    if is_superadmin {
         text.push_str(
             "\n\
             <b>Команды СУПЕРадминов:</b>\n\
@@ -84,7 +85,7 @@ pub async fn on_help_callback(
     let Some(chat_id) = callback.chat_id() else {
         return Ok(());
     };
-    send_help_message(&bot, chat_id, db.get_user_role(callback.from.id).await?).await?;
+    send_help_message(&bot, chat_id, &db, callback.from.id).await?;
 
     Ok(())
 }
@@ -94,7 +95,7 @@ pub async fn on_help_command(bot: Bot, db: Arc<OknoId>, message: Message) -> any
         bail!("failed tp get user")
     };
 
-    send_help_message(&bot, message.chat.id, db.get_user_role(user.id).await?).await?;
+    send_help_message(&bot, message.chat.id, &db, user.id).await?;
 
     Ok(())
 }

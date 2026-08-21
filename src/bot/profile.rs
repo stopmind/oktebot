@@ -5,10 +5,11 @@ use crate::{
         scheme::{BIO_CALLBACK, CANCEL_CALLBACK, HELP_CALLBACK, PROFILE_CALLBACK_PREFIX},
         session::{Session, SessionState},
     },
-    oknoid::{OknoId, UserInfo, UserRole},
+    oknoid::{OknoId, Role, UserInfo},
     parser,
 };
 use anyhow::{anyhow, bail};
+use itertools::Itertools;
 use log::error;
 use std::sync::Arc;
 use teloxide::{
@@ -47,7 +48,7 @@ pub async fn on_start(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Re
         error!("Error registering user: {:?}", error);
     };
 
-    bot.send_message(message.chat.id, "Вы зарегестрированы.")
+    bot.send_message(message.chat.id, "Вы зарегистрированы.")
         .reply_markup(InlineKeyboardMarkup::new([
             [InlineKeyboardButton::new(
                 "Добавить описание",
@@ -171,24 +172,21 @@ async fn send_profile(
     username: &str,
 ) -> anyhow::Result<()> {
     let info = db.get_user_info(user_id).await?;
-    let text = if let Some(bio) = info.bio.as_ref() {
-        format!(
-            "Пользователь: @{username}\n\
-            Роль: {}\n\
-            Репутация: {}.\n\
-            Описание:\n\
-            {bio}",
-            info.role, info.reputation
-        )
-    } else {
-        format!(
-            "Пользователь: {username}\n\
-            Роль: {}\n\
-            Репутация: {}.\n\
-            Нет описания.",
-            info.role, info.reputation
-        )
-    };
+    let roles_string = info.roles.iter().join(", ");
+    let text = format!(
+        "Пользователь: @{username}\n\
+        Репутация: {}.\n\
+        Роли: {}.\n\
+        Описание: {}.",
+        info.reputation,
+        if info.roles.is_empty() {
+            "нет"
+        } else {
+            roles_string.as_str()
+        },
+        info.bio.as_deref().unwrap_or("нет")
+    );
+
     bot.send_message(chat_id, text).await?;
     Ok(())
 }
@@ -256,54 +254,20 @@ pub async fn on_profile_callback(
     Ok(())
 }
 
-async fn change_role_with_condition(
-    bot: &Bot,
-    db: &OknoId,
-    message: &Message,
-    mention: Mention,
-    role: UserRole,
-    condition: impl FnOnce(UserRole) -> bool,
-) -> anyhow::Result<bool> {
-    let Some(User { id: user_id, .. }) = message.from else {
-        bail!("Failed get user id");
-    };
-    if db.get_user_role(user_id).await? < UserRole::Admin {
-        bot.send_message(message.chat.id, "У вас недостаточно прав")
-            .await?;
-        return Ok(false);
-    }
-
-    let Some(target_id) = mention.resolve(db) else {
-        bot.send_message(message.chat.id, "Неизвестный пользователь")
-            .await?;
-        return Ok(false);
-    };
-
-    let current_role = db.get_user_role(target_id).await?;
-    let proceed = condition(current_role);
-
-    if proceed {
-        db.set_user_role(target_id, role).await?;
-    } else {
-        bot.send_message(
-            message.chat.id,
-            format!("Пользователь имеет роль: {current_role}"),
-        )
-        .await?;
-    }
-
-    Ok(proceed)
-}
-
 pub async fn add_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
     let args = get_args(&message);
     if let Some(mention) = parser![Mention](args) {
-        if change_role_with_condition(&bot, &db, &message, mention, UserRole::Admin, |r| {
-            r < UserRole::Admin
-        })
-        .await?
-        {
+        let Some(id) = mention.resolve(&db) else {
+            bot.send_message(message.chat.id, "Пользователь не найден!")
+                .await?;
+            return Ok(());
+        };
+
+        if db.give_role(id, Role::Admin).await? {
             bot.send_message(message.chat.id, "Пользователь назначен админом.")
+                .await?;
+        } else {
+            bot.send_message(message.chat.id, "Пользователь уже является админом.")
                 .await?;
         }
     } else {
@@ -315,12 +279,17 @@ pub async fn add_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::R
 pub async fn del_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
     let args = get_args(&message);
     if let Some(mention) = parser![Mention](args) {
-        if change_role_with_condition(&bot, &db, &message, mention, UserRole::Standard, |r| {
-            r == UserRole::Admin
-        })
-        .await?
-        {
-            bot.send_message(message.chat.id, "Пользователь назначен админом.")
+        let Some(id) = mention.resolve(&db) else {
+            bot.send_message(message.chat.id, "Пользователь не найден!")
+                .await?;
+            return Ok(());
+        };
+
+        if db.take_role(id, Role::Admin).await? {
+            bot.send_message(message.chat.id, "Пользователь более не является админом.")
+                .await?;
+        } else {
+            bot.send_message(message.chat.id, "Пользователь не админ.")
                 .await?;
         }
     } else {
@@ -335,7 +304,7 @@ pub async fn change_rep(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::
         bail!("Failed get user id");
     };
 
-    if db.get_user_role(user_id).await? < UserRole::Admin {
+    if !db.check_user_privileges(user_id).await? {
         bot.send_message(message.chat.id, "У вас недостаточно прав")
             .await?;
         return Ok(());
