@@ -15,6 +15,7 @@ use teloxide::{
     filter_command,
     prelude::*,
 };
+use crate::bot::profile::on_top;
 
 pub const CANCEL_CALLBACK: &str = "cancel";
 pub const HELP_CALLBACK: &str = "help";
@@ -37,7 +38,8 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         .branch(case![Command::Me].endpoint(on_me))
                         .branch(case![Command::AdminAdd].endpoint(add_admin))
                         .branch(case![Command::AdminDel].endpoint(del_admin))
-                        .branch(case![Command::Rep].endpoint(change_rep)),
+                        .branch(case![Command::Rep].endpoint(change_rep))
+                        .branch(case![Command::Top].endpoint(on_top)),
                 )
                 .branch(
                     case![SessionState::WaitSupportMessage { category }]

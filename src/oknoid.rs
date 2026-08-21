@@ -12,6 +12,8 @@ use std::{
 };
 use teloxide::prelude::*;
 use thiserror::Error;
+use futures::stream::StreamExt;
+use futures::TryStreamExt;
 
 #[derive(Error, Debug)]
 pub enum IdError {
@@ -314,5 +316,18 @@ impl OknoId {
 
     pub async fn check_user_privileges(&self, id: UserId) -> IdResult<bool> {
         Ok(self.is_super_admin(id) || self.check_role(id, Role::Admin).await?)
+    }
+
+    pub async fn get_top(&self, offset: u32, limit: u32) -> IdResult<Vec<(UserId, i64, String)>> {
+        sqlx::query_as("SELECT id, reputation, username FROM users ORDER BY reputation DESC LIMIT ? OFFSET ?")
+            .bind(limit)
+            .bind(offset)
+            .fetch(&self.pool)
+            .map(|res| {
+                let (id, rep, username) = res?;
+                Ok((UserId(id), rep, username))
+            })
+            .try_collect()
+            .await
     }
 }
