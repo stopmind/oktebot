@@ -68,7 +68,7 @@ impl Role {
         }
 
         use Role::*;
-        chk!(Admin)
+        chk!(Admin, OknoUnit)
     }
 
     const fn to_db(self) -> i64 {

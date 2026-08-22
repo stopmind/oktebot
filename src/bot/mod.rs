@@ -7,6 +7,7 @@ use teloxide::{
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, ParseMode},
 };
+use teloxide::types::BotCommand;
 
 mod args;
 mod command;
@@ -46,10 +47,12 @@ pub async fn send_help_message(
         \n\
         <b>Команды:</b>\n\
         /help - эта справка.\n\
-        /support - переслать следующее сообщение в поддержку, работает только в ЛС.\n\
-        /me - запросить свой профиль.\n\
+        /support - отправть сообщение в тех. поддержку, работает только в ЛС.\n\
+        /me - показать свой профиль.\n\
         /info <code>&lt;пользователь&gt;</code> - запросить профиль пользователя.\n\
-        /bio - установить следующее сообщение как описание профиля.\n\
+        /bio - установить описание профиля.\n\
+        /top - топ пользователей по репутации.\n\
+        /unit - информация о OKNO Unit.\n\
     "
     .to_owned();
 
@@ -66,6 +69,7 @@ pub async fn send_help_message(
             <b>Команды СУПЕРадминов:</b>\n\
             /admin_add <code>&lt;пользователь&gt;</code> - добавить админа.\n\
             /admin_del <code>&lt;пользователь&gt;</code> - убрать админа.\n\
+            /drop <code>&lt;ссылка&gt;</code> - создать новый дроп.\n\
         ",
         );
     }
@@ -97,6 +101,20 @@ pub async fn on_help_command(bot: Bot, db: Arc<OknoId>, message: Message) -> any
     };
 
     send_help_message(&bot, message.chat.id, &db, user.id).await?;
+
+    Ok(())
+}
+
+pub async fn set_commands(bot: &Bot) -> anyhow::Result<()> {
+    bot.set_my_commands([
+        BotCommand::new("help", "полная справка"),
+        BotCommand::new("support", "отправить сообщение в тех поддержку, работает только в ЛС"),
+        BotCommand::new("me", "показать свой профиль"),
+        BotCommand::new("bio", "установить описание профиля"),
+        BotCommand::new("top", "топ пользователей по репутации"),
+        BotCommand::new("unit", "информация о OKNO Unit"),
+    ])
+        .await?;
 
     Ok(())
 }
