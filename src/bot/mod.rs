@@ -1,13 +1,17 @@
-use crate::{bot::scheme::HELP_CALLBACK, oknoid::OknoId};
-use anyhow::bail;
+use crate::{
+    bot::scheme::{BIO_CALLBACK, HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, UNIT_INFO_CALLBACK},
+    oknoid::OknoId,
+};
+use anyhow::{anyhow, bail};
 use std::sync::Arc;
 use teloxide::{
     RequestError,
     dispatching::dialogue::GetChatId,
     prelude::*,
-    types::{InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, ParseMode},
+    types::{
+        BotCommand, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, ParseMode,
+    },
 };
-use teloxide::types::BotCommand;
 
 mod args;
 mod command;
@@ -47,6 +51,7 @@ pub async fn send_help_message(
         \n\
         <b>Команды:</b>\n\
         /help - эта справка.\n\
+        /main_menu - главное меню.\n\
         /support - отправть сообщение в тех. поддержку, работает только в ЛС.\n\
         /me - показать свой профиль.\n\
         /info <code>&lt;пользователь&gt;</code> - запросить профиль пользователя.\n\
@@ -108,13 +113,53 @@ pub async fn on_help_command(bot: Bot, db: Arc<OknoId>, message: Message) -> any
 pub async fn set_commands(bot: &Bot) -> anyhow::Result<()> {
     bot.set_my_commands([
         BotCommand::new("help", "полная справка"),
-        BotCommand::new("support", "отправить сообщение в тех поддержку, работает только в ЛС"),
+        BotCommand::new("main_menu", "главное меню"),
+        BotCommand::new(
+            "support",
+            "отправить сообщение в тех поддержку, работает только в ЛС",
+        ),
         BotCommand::new("me", "показать свой профиль"),
         BotCommand::new("bio", "установить описание профиля"),
         BotCommand::new("top", "топ пользователей по репутации"),
         BotCommand::new("unit", "информация о OKNO Unit"),
     ])
+    .await?;
+
+    Ok(())
+}
+
+pub async fn main_menu(bot: &Bot, chat_id: ChatId) -> anyhow::Result<()> {
+    bot.send_message(chat_id, "Главное меню")
+        .reply_markup(InlineKeyboardMarkup::new([
+            vec![
+                InlineKeyboardButton::url("ТГК OKNO", "https://t.me/oknogmdv".parse()?),
+                InlineKeyboardButton::url("OKNOWEB", "https://oknoweb.ru".parse()?),
+            ],
+            vec![
+                InlineKeyboardButton::callback("Профиль", ME_CALLBACK.to_string()),
+                InlineKeyboardButton::callback("Поддержка", SUPPORT_CALLBACK.to_string()),
+            ],
+            vec![InlineKeyboardButton::callback(
+                "Изменить описание",
+                BIO_CALLBACK.to_string(),
+            )],
+            vec![InlineKeyboardButton::callback(
+                "OKNO UNIT",
+                UNIT_INFO_CALLBACK.to_string(),
+            )],
+        ]))
         .await?;
 
     Ok(())
+}
+pub async fn main_menu_command(bot: Bot, message: Message) -> anyhow::Result<()> {
+    main_menu(&bot, message.chat.id).await
+}
+
+pub async fn main_menu_callback(bot: Bot, callback: CallbackQuery) -> anyhow::Result<()> {
+    let chat_id = callback
+        .chat_id()
+        .ok_or_else(|| anyhow!("failed to get chat id from callback"))?;
+
+    main_menu(&bot, chat_id).await
 }

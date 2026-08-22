@@ -9,12 +9,12 @@ use anyhow::{Result, anyhow, bail};
 use std::sync::Arc;
 use teloxide::{
     prelude::{Message, *},
-    types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup},
+    types::{Chat, ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup},
 };
 
-pub async fn on_support(bot: Bot, message: Message, config: Arc<Config>) -> Result<()> {
-    if matches!(message.chat.kind, ChatKind::Private(..)) {
-        bot.send_message(message.chat.id, "Выберите категорию: ")
+async fn support(bot: &Bot, config: &Config, chat: &Chat) -> Result<()> {
+    if matches!(chat.kind, ChatKind::Private(..)) {
+        bot.send_message(chat.id, "Выберите категорию: ")
             .reply_markup(InlineKeyboardMarkup::new(
                 config.support_categories_layout.iter().map(|row| {
                     row.iter().map(|i| {
@@ -30,12 +30,32 @@ pub async fn on_support(bot: Bot, message: Message, config: Arc<Config>) -> Resu
             .await?;
     } else {
         bot.send_message(
-            message.chat.id,
+            chat.id,
             "Команда может быть использована только в личных сообщениях.",
         )
         .await?;
     }
 
+    Ok(())
+}
+
+pub async fn on_support(bot: Bot, config: Arc<Config>, message: Message) -> Result<()> {
+    support(&bot, &config, &message.chat).await
+}
+
+pub async fn support_callback(
+    bot: Bot,
+    config: Arc<Config>,
+    callback: CallbackQuery,
+) -> Result<()> {
+    let chat = callback
+        .message
+        .as_ref()
+        .map(|msg| msg.chat())
+        .ok_or_else(|| anyhow!("callback chat not found"))?;
+
+    support(&bot, &config, chat).await?;
+    bot.answer_callback_query(callback.id).await?;
     Ok(())
 }
 

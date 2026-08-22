@@ -16,19 +16,16 @@ use log::error;
 use std::{fmt::Write, iter, sync::Arc};
 use teloxide::{
     Bot,
+    dispatching::dialogue::GetChatId,
     payloads::SendMessageSetters,
     requests::Requester,
     types::{
-        CallbackQuery, Chat, ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind,
+        CallbackQuery, Chat, ChatId, ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind,
         InlineKeyboardMarkup, Message, User, UserId,
     },
 };
 
-pub async fn unit_info_command(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow::Result<()> {
-    let Some(User { id: user_id, .. }) = message.from else {
-        bail!("failed to get user id")
-    };
-
+async fn unit_info(bot: &Bot, db: &OknoId, user_id: UserId, chat_id: ChatId) -> anyhow::Result<()> {
     if db.check_role(user_id, Role::OknoUnit).await? {
         let drops = db.get_latest_drops(3).await?;
 
@@ -65,11 +62,9 @@ pub async fn unit_info_command(bot: Bot, db: Arc<OknoId>, message: Message) -> a
                 )])),
         );
 
-        bot.send_message(message.chat.id, text)
-            .reply_markup(markup)
-            .await?;
+        bot.send_message(chat_id, text).reply_markup(markup).await?;
     } else {
-        bot.send_message(message.chat.id, "Присоединяйтесь к Okno UNIT")
+        bot.send_message(chat_id, "Присоединяйтесь к Okno UNIT")
             .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
                 "Присоединится",
                 InlineKeyboardButtonKind::CallbackData(UNIT_JOIN_CALLBACK.to_string()),
@@ -77,6 +72,28 @@ pub async fn unit_info_command(bot: Bot, db: Arc<OknoId>, message: Message) -> a
             .await?;
     }
 
+    Ok(())
+}
+
+pub async fn unit_info_command(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow::Result<()> {
+    let Some(User { id: user_id, .. }) = message.from else {
+        bail!("failed to get user id")
+    };
+
+    unit_info(&bot, &db, user_id, message.chat.id).await
+}
+
+pub async fn unit_info_callback(
+    bot: Bot,
+    db: Arc<OknoId>,
+    callback: CallbackQuery,
+) -> anyhow::Result<()> {
+    let chat_id = callback
+        .chat_id()
+        .ok_or_else(|| anyhow!("Failed to get callback chat id"))?;
+
+    unit_info(&bot, &db, callback.from.id, chat_id).await?;
+    bot.answer_callback_query(callback.id).await?;
     Ok(())
 }
 
@@ -116,7 +133,8 @@ pub async fn unit_accept_report_callback(
     let chat_id = *chat_id;
 
     if !db.check_user_privileges(callback.from.id).await? {
-        bot.send_message(chat_id, "У вас нет недостаточно прав!").await?;
+        bot.send_message(chat_id, "У вас нет недостаточно прав!")
+            .await?;
         bot.answer_callback_query(callback.id).await?;
         return Ok(());
     }

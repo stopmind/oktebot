@@ -2,13 +2,12 @@ mod bot;
 mod config;
 mod oknoid;
 
-use crate::{config::Config, oknoid::OknoId};
+use crate::{bot::set_commands, config::Config, oknoid::OknoId};
 use anyhow::anyhow;
 use bot::{scheme::scheme, session::SessionState};
 use log::{LevelFilter, error, info};
 use std::{env, fs, sync::Arc};
 use teloxide::{dispatching::dialogue::InMemStorage, prelude::*};
-use crate::bot::set_commands;
 
 async fn start() -> anyhow::Result<()> {
     info!("Starting bot...");
@@ -29,8 +28,7 @@ async fn start() -> anyhow::Result<()> {
     let db = OknoId::open(config.clone()).await?;
     let bot = Bot::new(config.token.clone());
 
-    set_commands(&bot)
-        .await?;
+    set_commands(&bot).await?;
 
     Dispatcher::builder(bot, scheme())
         .dependencies(dptree::deps![

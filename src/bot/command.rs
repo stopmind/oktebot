@@ -16,4 +16,5 @@ pub enum Command {
     Unit,
     UnitReport,
     Drop,
+    MainMenu,
 }

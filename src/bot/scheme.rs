@@ -1,14 +1,15 @@
 use crate::bot::{
     command::Command,
+    main_menu_callback, main_menu_command,
     oknounit::{
         drop_command, drops_history_callback, on_unit_report_cancel, on_unit_report_message,
-        unit_accept_report_callback, unit_info_command, unit_join_callback, unit_report_callback,
-        unit_report_command,
+        unit_accept_report_callback, unit_info_callback, unit_info_command, unit_join_callback,
+        unit_report_callback, unit_report_command,
     },
     on_help_callback, on_help_command,
     profile::{
-        add_admin, change_rep, del_admin, on_bio, on_bio_callback, on_bio_cancel, on_bio_message,
-        on_info, on_me, on_profile_callback, on_start, on_top, usernames_inspect,
+        add_admin, change_rep, del_admin, me_callback, on_bio, on_bio_callback, on_bio_cancel,
+        on_bio_message, on_info, on_me, on_profile_callback, on_start, on_top, usernames_inspect,
     },
     session::SessionState,
     support::*,
@@ -30,6 +31,10 @@ pub const UNIT_JOIN_CALLBACK: &str = "unit-join";
 pub const UNIT_REPORT_CALLBACK_PREFIX: &str = "unit-report";
 pub const UNIT_ACCEPT_REPORT_CALLBACK_PREFIX: &str = "unit-accept";
 pub const DROPS_HISTORY_CALLBACK: &str = "drops-history";
+pub const MAIN_MENU_CALLBACK: &str = "main-menu";
+pub const SUPPORT_CALLBACK: &str = "support";
+pub const ME_CALLBACK: &str = "me";
+pub const UNIT_INFO_CALLBACK: &str = "unit-info";
 
 pub fn scheme() -> UpdateHandler<anyhow::Error> {
     dialogue::enter::<Update, InMemStorage<SessionState>, SessionState, _>()
@@ -50,7 +55,8 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         .branch(case![Command::Top].endpoint(on_top))
                         .branch(case![Command::Unit].endpoint(unit_info_command))
                         .branch(case![Command::UnitReport].endpoint(unit_report_command))
-                        .branch(case![Command::Drop].endpoint(drop_command)),
+                        .branch(case![Command::Drop].endpoint(drop_command))
+                        .branch(case![Command::MainMenu].endpoint(main_menu_command)),
                 )
                 .branch(
                     case![SessionState::WaitSupportMessage { category }]
@@ -78,6 +84,14 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                 )
                 .branch(filter(utils::callback_filter(HELP_CALLBACK)).endpoint(on_help_callback))
                 .branch(filter(utils::callback_filter(BIO_CALLBACK)).endpoint(on_bio_callback))
+                .branch(
+                    filter(utils::callback_filter(MAIN_MENU_CALLBACK)).endpoint(main_menu_callback),
+                )
+                .branch(
+                    filter(utils::callback_filter(UNIT_INFO_CALLBACK)).endpoint(unit_info_callback),
+                )
+                .branch(filter(utils::callback_filter(ME_CALLBACK)).endpoint(me_callback))
+                .branch(filter(utils::callback_filter(SUPPORT_CALLBACK)).endpoint(support_callback))
                 .branch(
                     filter(utils::callback_filter(UNIT_JOIN_CALLBACK)).endpoint(unit_join_callback),
                 )

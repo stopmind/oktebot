@@ -1,11 +1,11 @@
 use crate::{
     bot::{
         args::{Mention, get_args},
-        invalid_usage_message,
-        scheme::{BIO_CALLBACK, CANCEL_CALLBACK, HELP_CALLBACK, PROFILE_CALLBACK_PREFIX},
+        invalid_usage_message, main_menu,
+        scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX},
         session::{Session, SessionState},
     },
-    oknoid::{OknoId, Role, UserInfo},
+    oknoid::{IdError, OknoId, Role, UserInfo},
     parser,
 };
 use anyhow::{anyhow, bail};
@@ -14,6 +14,7 @@ use log::error;
 use std::{fmt::Write, sync::Arc};
 use teloxide::{
     Bot,
+    dispatching::dialogue::GetChatId,
     payloads::SendMessageSetters,
     prelude::{CallbackQuery, ChatId, Message, Requester, UserId},
     types::{
@@ -47,23 +48,12 @@ pub async fn on_start(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Re
     if let Err(error) = db
         .register_user(*id, username.clone(), UserInfo::default())
         .await
+        && !matches!(error, IdError::UserExists(..))
     {
         error!("Error registering user: {:?}", error);
     };
 
-    bot.send_message(message.chat.id, "Вы зарегистрированы.")
-        .reply_markup(InlineKeyboardMarkup::new([
-            [InlineKeyboardButton::new(
-                "Добавить описание",
-                InlineKeyboardButtonKind::CallbackData(BIO_CALLBACK.to_owned()),
-            )],
-            [InlineKeyboardButton::new(
-                "Справка",
-                InlineKeyboardButtonKind::CallbackData(HELP_CALLBACK.to_owned()),
-            )],
-        ]))
-        .await?;
-    Ok(())
+    main_menu(&bot, message.chat.id).await
 }
 
 pub async fn on_bio(bot: Bot, session: Session, message: Message) -> anyhow::Result<()> {
@@ -226,6 +216,22 @@ pub async fn on_me(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Resul
     };
 
     send_profile(&bot, &db, message.chat.id, *id, username.as_str()).await
+}
+
+pub async fn me_callback(bot: Bot, db: Arc<OknoId>, callback: CallbackQuery) -> anyhow::Result<()> {
+    let chat_id = callback
+        .chat_id()
+        .ok_or_else(|| anyhow!("Failed to get callback chat id"))?;
+
+    let username = callback
+        .from
+        .username
+        .as_deref()
+        .ok_or_else(|| anyhow!("Failed to get username"))?;
+
+    send_profile(&bot, &db, chat_id, callback.from.id, username).await?;
+    bot.answer_callback_query(callback.id).await?;
+    Ok(())
 }
 
 pub async fn on_profile_callback(
