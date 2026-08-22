@@ -78,6 +78,7 @@ impl Role {
 
 #[derive(Default)]
 pub struct UserInfo {
+    #[allow(dead_code)]
     pub roles: BTreeSet<Role>,
     pub reputation: i64,
     pub bio: Option<String>,
@@ -398,6 +399,14 @@ impl OknoId {
             .fetch_one(&self.pool)
             .await
             .map(|(exists,)| exists)
+            .map_err(IdError::from)
+    }
+
+    pub async fn users_count(&self) -> IdResult<u32> {
+        sqlx::query_as("SELECT COUNT(*) FROM users")
+            .fetch_one(&self.pool)
+            .await
+            .map(|(count,)| count)
             .map_err(IdError::from)
     }
 }

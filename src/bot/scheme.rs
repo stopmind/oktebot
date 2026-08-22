@@ -9,7 +9,8 @@ use crate::bot::{
     on_help_callback, on_help_command,
     profile::{
         add_admin, change_rep, del_admin, me_callback, on_bio, on_bio_callback, on_bio_cancel,
-        on_bio_message, on_info, on_me, on_profile_callback, on_start, on_top, usernames_inspect,
+        on_bio_message, on_info, on_me, on_profile_callback, on_start, top_callback, top_command,
+        usernames_inspect,
     },
     session::SessionState,
     support::*,
@@ -35,6 +36,8 @@ pub const MAIN_MENU_CALLBACK: &str = "main-menu";
 pub const SUPPORT_CALLBACK: &str = "support";
 pub const ME_CALLBACK: &str = "me";
 pub const UNIT_INFO_CALLBACK: &str = "unit-info";
+pub const TOP_CALLBACK_PREFIX: &str = "top";
+pub const TOP_CALLBACK: &str = "top0";
 
 pub fn scheme() -> UpdateHandler<anyhow::Error> {
     dialogue::enter::<Update, InMemStorage<SessionState>, SessionState, _>()
@@ -52,7 +55,7 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         .branch(case![Command::AdminAdd].endpoint(add_admin))
                         .branch(case![Command::AdminDel].endpoint(del_admin))
                         .branch(case![Command::Rep].endpoint(change_rep))
-                        .branch(case![Command::Top].endpoint(on_top))
+                        .branch(case![Command::Top].endpoint(top_command))
                         .branch(case![Command::Unit].endpoint(unit_info_command))
                         .branch(case![Command::UnitReport].endpoint(unit_report_command))
                         .branch(case![Command::Drop].endpoint(drop_command))
@@ -118,6 +121,10 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         UNIT_ACCEPT_REPORT_CALLBACK_PREFIX,
                     ))
                     .endpoint(unit_accept_report_callback),
+                )
+                .branch(
+                    filter(utils::callback_prefix_filter(TOP_CALLBACK_PREFIX))
+                        .endpoint(top_callback),
                 ),
         )
 }

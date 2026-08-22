@@ -2,7 +2,7 @@ use crate::{
     bot::{
         args::{Mention, get_args},
         invalid_usage_message, main_menu,
-        scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX},
+        scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX, TOP_CALLBACK_PREFIX},
         session::{Session, SessionState},
     },
     oknoid::{IdError, OknoId, Role, UserInfo},
@@ -11,7 +11,7 @@ use crate::{
 use anyhow::{anyhow, bail};
 use itertools::Itertools;
 use log::error;
-use std::{fmt::Write, sync::Arc};
+use std::{fmt::Write, iter, sync::Arc};
 use teloxide::{
     Bot,
     dispatching::dialogue::GetChatId,
@@ -165,19 +165,12 @@ async fn send_profile(
     username: &str,
 ) -> anyhow::Result<()> {
     let info = db.get_user_info(user_id).await?;
-    let roles_string = info.roles.iter().join(", ");
     let text = format!(
-        "Пользователь: @{username}\n\
-        Репутация: {}.\n\
-        Роли: {}.\n\
-        Описание: {}.",
+        "> Username: {username}\n\
+        > Bio: {}\n\
+        > Reputation: {} ⚡",
+        info.bio.as_deref().unwrap_or("none"),
         info.reputation,
-        if info.roles.is_empty() {
-            "нет"
-        } else {
-            roles_string.as_str()
-        },
-        info.bio.as_deref().unwrap_or("нет")
     );
 
     bot.send_message(chat_id, text).await?;
@@ -338,21 +331,25 @@ pub async fn change_rep(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::
     Ok(())
 }
 
-pub async fn on_top(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow::Result<()> {
-    let top_data = db.get_top(0, 20).await?;
+async fn top(bot: &Bot, db: &OknoId, chat_id: ChatId, page: u32) -> anyhow::Result<()> {
+    const PAGE_SIZE: u32 = 20;
+    let top_data = db.get_top(page * PAGE_SIZE, PAGE_SIZE).await?;
 
-    let mut text = "<b>Таблица репутации OknoMembers:</b>\n".to_string();
+    let mut text = format!(
+        "<b>Таблица репутации OknoMembers:</b> (страница {})\n",
+        page + 1
+    );
     for (i, (_, rep, username)) in top_data.into_iter().enumerate() {
-        match i {
-            0 => writeln!(
+        match (i, page) {
+            (0, 0) => writeln!(
                 &mut text,
                 "&gt; <tg-emoji emoji-id=\"5388614717164005740\">🪷</tg-emoji> <b>{username}</b> - {rep} rep."
             )?,
-            1 => writeln!(
+            (1, 0) => writeln!(
                 &mut text,
                 "&gt; <tg-emoji emoji-id=\"5388967879439852799\">🌸</tg-emoji> <b>{username}</b> - {rep} rep."
             )?,
-            2 => writeln!(
+            (2, 0) => writeln!(
                 &mut text,
                 "&gt; <tg-emoji emoji-id=\"5388956849963837711\">🌸</tg-emoji> <b>{username}</b> - {rep} rep."
             )?,
@@ -360,9 +357,50 @@ pub async fn on_top(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow::Resu
         }
     }
 
-    bot.send_message(message.chat.id, text)
+    let next_page_exists = db.users_count().await? > PAGE_SIZE * (page + 1);
+    let markup = InlineKeyboardMarkup::new(iter::chain(
+        (page > 0).then(|| {
+            [InlineKeyboardButton::callback(
+                "< Предыдущая страница",
+                format!("{TOP_CALLBACK_PREFIX}{}", page - 1),
+            )]
+        }),
+        next_page_exists.then(|| {
+            [InlineKeyboardButton::callback(
+                "Следующая страница >",
+                format!("{TOP_CALLBACK_PREFIX}{}", page + 1),
+            )]
+        }),
+    ));
+
+    bot.send_message(chat_id, text)
         .parse_mode(ParseMode::Html)
+        .reply_markup(markup)
         .await?;
 
+    Ok(())
+}
+
+pub async fn top_command(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow::Result<()> {
+    top(&bot, &db, message.chat.id, 0).await
+}
+
+pub async fn top_callback(
+    bot: Bot,
+    db: Arc<OknoId>,
+    callback: CallbackQuery,
+) -> anyhow::Result<()> {
+    let chat_id = callback
+        .chat_id()
+        .ok_or_else(|| anyhow!("Failed to get callback chat id"))?;
+    let data = callback
+        .data
+        .as_deref()
+        .ok_or_else(|| anyhow!("callback data not found"))?;
+
+    let page = data[TOP_CALLBACK_PREFIX.len()..].parse()?;
+
+    top(&bot, &db, chat_id, page).await?;
+    bot.answer_callback_query(callback.id).await?;
     Ok(())
 }

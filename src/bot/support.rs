@@ -14,7 +14,10 @@ use teloxide::{
 
 async fn support(bot: &Bot, config: &Config, chat: &Chat) -> Result<()> {
     if matches!(chat.kind, ChatKind::Private(..)) {
-        bot.send_message(chat.id, "Выберите категорию: ")
+        bot.send_message(chat.id, "\
+            Здесь вы можете обратится напрямую к администрации бота и oknoweb.ru. ВСЕ обращения будут рассмотрены.\n\
+            \n\
+            На какую тему ваше обращение?")
             .reply_markup(InlineKeyboardMarkup::new(
                 config.support_categories_layout.iter().map(|row| {
                     row.iter().map(|i| {

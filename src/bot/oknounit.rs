@@ -3,7 +3,7 @@ use crate::{
         args::get_args,
         invalid_usage_message,
         scheme::{
-            CANCEL_CALLBACK, DROPS_HISTORY_CALLBACK, PROFILE_CALLBACK_PREFIX,
+            CANCEL_CALLBACK, DROPS_HISTORY_CALLBACK, MAIN_MENU_CALLBACK, PROFILE_CALLBACK_PREFIX,
             UNIT_ACCEPT_REPORT_CALLBACK_PREFIX, UNIT_JOIN_CALLBACK, UNIT_REPORT_CALLBACK_PREFIX,
         },
         session::{Session, SessionState},
@@ -34,10 +34,10 @@ async fn unit_info(bot: &Bot, db: &OknoId, user_id: UserId, chat_id: ChatId) -> 
             drop_completeness.push(db.check_drop_completed(*id, user_id).await?);
         }
 
-        let mut text = "Latest drops: \n".to_string();
+        let mut text = "Последние дропы: \n".to_string();
         for (i, (_, link)) in drops.iter().enumerate() {
             if drop_completeness[i] {
-                writeln!(&mut text, "{}. {} (completed)", i + 1, link)?;
+                writeln!(&mut text, "{}. {} (выполнен)", i + 1, link)?;
             } else {
                 writeln!(&mut text, "{}. {}", i + 1, link)?;
             }
@@ -50,23 +50,31 @@ async fn unit_info(bot: &Bot, db: &OknoId, user_id: UserId, chat_id: ChatId) -> 
                 .filter(|(i, _)| !drop_completeness[*i])
                 .map(|(i, (id, _))| {
                     [InlineKeyboardButton::new(
-                        format!("Report drop {}", i + 1),
+                        format!("Выполнить дроп {}", i + 1),
                         InlineKeyboardButtonKind::CallbackData(format!(
                             "{UNIT_REPORT_CALLBACK_PREFIX}{id}"
                         )),
                     )]
                 })
                 .chain(iter::once([InlineKeyboardButton::new(
-                    "History",
+                    "История дропов",
                     InlineKeyboardButtonKind::CallbackData(DROPS_HISTORY_CALLBACK.to_string()),
                 )])),
         );
 
         bot.send_message(chat_id, text).reply_markup(markup).await?;
     } else {
-        bot.send_message(chat_id, "Присоединяйтесь к Okno UNIT")
+        bot.send_message(chat_id, "\
+        OknoUnit - Это статус боевой единицы нашего сообщества. Задача каждого OknoUnit`а - проявлять активность на дропах.\n\
+        \n\
+        Дроп - это любое видео, игра или другая единица контента от нашего сообщества.\n\
+        \n\
+        За каждый комментарий/отзыв ваша репутация повышается. OknoUnit - один из самых эффективных способов нафармить репутацию.\n\
+        \n\
+        Будучи OknoUnit вы будете получать уведомления о новых дропах первыми.\
+        ")
             .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-                "Присоединится",
+                "Стать OknoUnit",
                 InlineKeyboardButtonKind::CallbackData(UNIT_JOIN_CALLBACK.to_string()),
             )]]))
             .await?;
@@ -111,7 +119,10 @@ pub async fn unit_join_callback(
     let chat_id = *chat_id;
 
     if db.give_role(callback.from.id, Role::OknoUnit).await? {
-        bot.send_message(chat_id, "С вступлением в Onko Unit")
+        bot.send_message(chat_id, "Вы стали OknoUnit!")
+            .reply_markup(InlineKeyboardMarkup::new([[
+                InlineKeyboardButton::callback("В меню", MAIN_MENU_CALLBACK),
+            ]]))
             .await?;
     }
 
@@ -133,7 +144,7 @@ pub async fn unit_accept_report_callback(
     let chat_id = *chat_id;
 
     if !db.check_user_privileges(callback.from.id).await? {
-        bot.send_message(chat_id, "У вас нет недостаточно прав!")
+        bot.send_message(chat_id, "У вас недостаточно прав!")
             .await?;
         bot.answer_callback_query(callback.id).await?;
         return Ok(());
@@ -154,8 +165,11 @@ pub async fn unit_accept_report_callback(
             "Дроп был отмечен как выполненный для данного пользователя.",
         )
         .await?;
-        bot.send_message(unit_id, format!("Вы выполнили дроп {drop_id}"))
-            .await?;
+        bot.send_message(
+            unit_id,
+            format!("Ваша заявка по дропу {drop_id} была принята."),
+        )
+        .await?;
     } else {
         bot.send_message(chat_id, "Дроп уже был выполнен данным пользователем.")
             .await?;
@@ -193,7 +207,7 @@ pub async fn on_unit_report_message(
                 )),
             )],
             [InlineKeyboardButton::new(
-                "Потвердить",
+                "Потвердеть",
                 InlineKeyboardButtonKind::CallbackData(format!(
                     "{UNIT_ACCEPT_REPORT_CALLBACK_PREFIX}{}-{}",
                     user.id, drop_id
@@ -201,8 +215,14 @@ pub async fn on_unit_report_message(
             )],
         ]))
         .await?;
-    bot.send_message(message.chat.id, "Сообщение отправлено!")
-        .await?;
+    bot.send_message(
+        message.chat.id,
+        "Заявка отправлено! Админы проверят вашу заявку и начислят вам репутацию",
+    )
+    .reply_markup(InlineKeyboardMarkup::new([[
+        InlineKeyboardButton::callback("В меню", MAIN_MENU_CALLBACK),
+    ]]))
+    .await?;
 
     Ok(())
 }
@@ -241,12 +261,15 @@ async fn unit_report(
         .update(SessionState::WaitUnitReport { drop_id })
         .await?;
 
-    bot.send_message(user_id, "Отправьте сообщение для подтверждения выполнения.")
-        .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-            "Отмена",
-            InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string()),
-        )]]))
-        .await?;
+    bot.send_message(
+        user_id,
+        "Скиньте ссылку на дроп и приложите скрин вашей активности (комментарий/отзыв)",
+    )
+    .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
+        "Отмена",
+        InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string()),
+    )]]))
+    .await?;
 
     Ok(())
 }
@@ -328,9 +351,9 @@ pub async fn drop_command(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow
     }
 
     let drop_id = db.add_drop(link).await?;
-    let text = format!("Новый дроп: {link}");
+    let text = format!("Новый дроп сообщества!\n{link}");
     let markup = InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-        "Report drop",
+        "Подать заявку",
         InlineKeyboardButtonKind::CallbackData(format!("{UNIT_REPORT_CALLBACK_PREFIX}{drop_id}")),
     )]]);
 
@@ -374,10 +397,10 @@ pub async fn drops_history_callback(
         drop_completeness.push(db.check_drop_completed(*id, callback.from.id).await?);
     }
 
-    let mut text = "Drops history\nUse /unit_report <id> to report:\n".to_string();
+    let mut text = "История дропов\nИспользуйте /unit_report <id> для подачи заявки:\n".to_string();
     for (i, (id, link)) in drops.iter().enumerate() {
         if drop_completeness[i] {
-            writeln!(&mut text, "{}. {} (completed)", id, link)?;
+            writeln!(&mut text, "{}. {} (выполнено)", id, link)?;
         } else {
             writeln!(&mut text, "{}. {}", id, link)?;
         }
