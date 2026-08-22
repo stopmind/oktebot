@@ -115,6 +115,12 @@ pub async fn unit_accept_report_callback(
         .ok_or_else(|| anyhow!("failed get callback chat id"))?;
     let chat_id = *chat_id;
 
+    if !db.check_user_privileges(callback.from.id).await? {
+        bot.send_message(chat_id, "У вас нет недостаточно прав!").await?;
+        bot.answer_callback_query(callback.id).await?;
+        return Ok(());
+    }
+
     let callback_data = callback
         .data
         .ok_or_else(|| anyhow!("failed get callback data"))?;
