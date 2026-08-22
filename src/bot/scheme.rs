@@ -1,9 +1,14 @@
 use crate::bot::{
     command::Command,
+    oknounit::{
+        drop_command, drops_history_callback, on_unit_report_cancel, on_unit_report_message,
+        unit_accept_report_callback, unit_info_command, unit_join_callback, unit_report_callback,
+        unit_report_command,
+    },
     on_help_callback, on_help_command,
     profile::{
         add_admin, change_rep, del_admin, on_bio, on_bio_callback, on_bio_cancel, on_bio_message,
-        on_info, on_me, on_profile_callback, on_start, usernames_inspect,
+        on_info, on_me, on_profile_callback, on_start, on_top, usernames_inspect,
     },
     session::SessionState,
     support::*,
@@ -15,13 +20,16 @@ use teloxide::{
     filter_command,
     prelude::*,
 };
-use crate::bot::profile::on_top;
 
 pub const CANCEL_CALLBACK: &str = "cancel";
 pub const HELP_CALLBACK: &str = "help";
 pub const BIO_CALLBACK: &str = "bio";
 pub const PROFILE_CALLBACK_PREFIX: &str = "profile";
 pub const SUPPORT_SELECTED_CALLBACK_PREFIX: &str = "support-selected";
+pub const UNIT_JOIN_CALLBACK: &str = "unit-join";
+pub const UNIT_REPORT_CALLBACK_PREFIX: &str = "unit-report";
+pub const UNIT_ACCEPT_REPORT_CALLBACK_PREFIX: &str = "unit-accept";
+pub const DROPS_HISTORY_CALLBACK: &str = "drops-history";
 
 pub fn scheme() -> UpdateHandler<anyhow::Error> {
     dialogue::enter::<Update, InMemStorage<SessionState>, SessionState, _>()
@@ -39,13 +47,20 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         .branch(case![Command::AdminAdd].endpoint(add_admin))
                         .branch(case![Command::AdminDel].endpoint(del_admin))
                         .branch(case![Command::Rep].endpoint(change_rep))
-                        .branch(case![Command::Top].endpoint(on_top)),
+                        .branch(case![Command::Top].endpoint(on_top))
+                        .branch(case![Command::Unit].endpoint(unit_info_command))
+                        .branch(case![Command::UnitReport].endpoint(unit_report_command))
+                        .branch(case![Command::Drop].endpoint(drop_command)),
                 )
                 .branch(
                     case![SessionState::WaitSupportMessage { category }]
                         .endpoint(on_support_message),
                 )
-                .branch(case![SessionState::WaitBioMessage].endpoint(on_bio_message)),
+                .branch(case![SessionState::WaitBioMessage].endpoint(on_bio_message))
+                .branch(
+                    case![SessionState::WaitUnitReport { drop_id }]
+                        .endpoint(on_unit_report_message),
+                ),
         )
         .branch(
             Update::filter_callback_query()
@@ -55,10 +70,21 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                             case![SessionState::WaitSupportMessage { category }]
                                 .endpoint(on_support_cancel),
                         )
-                        .branch(case![SessionState::WaitBioMessage].endpoint(on_bio_cancel)),
+                        .branch(case![SessionState::WaitBioMessage].endpoint(on_bio_cancel))
+                        .branch(
+                            case![SessionState::WaitUnitReport { drop_id }]
+                                .endpoint(on_unit_report_cancel),
+                        ),
                 )
                 .branch(filter(utils::callback_filter(HELP_CALLBACK)).endpoint(on_help_callback))
                 .branch(filter(utils::callback_filter(BIO_CALLBACK)).endpoint(on_bio_callback))
+                .branch(
+                    filter(utils::callback_filter(UNIT_JOIN_CALLBACK)).endpoint(unit_join_callback),
+                )
+                .branch(
+                    filter(utils::callback_filter(DROPS_HISTORY_CALLBACK))
+                        .endpoint(drops_history_callback),
+                )
                 .branch(
                     filter(utils::callback_prefix_filter(PROFILE_CALLBACK_PREFIX))
                         .endpoint(on_profile_callback),
@@ -68,6 +94,16 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         SUPPORT_SELECTED_CALLBACK_PREFIX,
                     ))
                     .endpoint(on_support_selected_callback),
+                )
+                .branch(
+                    filter(utils::callback_prefix_filter(UNIT_REPORT_CALLBACK_PREFIX))
+                        .endpoint(unit_report_callback),
+                )
+                .branch(
+                    filter(utils::callback_prefix_filter(
+                        UNIT_ACCEPT_REPORT_CALLBACK_PREFIX,
+                    ))
+                    .endpoint(unit_accept_report_callback),
                 ),
         )
 }

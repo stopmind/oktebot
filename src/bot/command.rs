@@ -12,5 +12,8 @@ pub enum Command {
     AdminAdd,
     AdminDel,
     Rep,
-    Top
+    Top,
+    Unit,
+    UnitReport,
+    Drop,
 }

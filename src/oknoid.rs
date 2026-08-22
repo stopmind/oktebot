@@ -2,6 +2,7 @@ use crate::{
     config::Config,
     oknoid::IdError::{UserExists, UserNotFound},
 };
+use futures::{TryStreamExt, stream::StreamExt};
 use log::info;
 use sqlx::{Error, SqlitePool, migrate::Migrator, sqlite::SqliteConnectOptions};
 use std::{
@@ -12,8 +13,6 @@ use std::{
 };
 use teloxide::prelude::*;
 use thiserror::Error;
-use futures::stream::StreamExt;
-use futures::TryStreamExt;
 
 #[derive(Error, Debug)]
 pub enum IdError {
@@ -44,6 +43,7 @@ type IdResult<T> = Result<T, IdError>;
 pub enum Role {
     Admin = 1,
     SuperAdmin = 2,
+    OknoUnit = 3,
 }
 
 impl Display for Role {
@@ -51,6 +51,7 @@ impl Display for Role {
         f.write_str(match self {
             Role::Admin => "админ",
             Role::SuperAdmin => "СУПЕРадмин",
+            Role::OknoUnit => "OKNO UNIT",
         })
     }
 }
@@ -92,6 +93,8 @@ pub struct OknoId {
     config: Arc<Config>,
     usernames: Mutex<Usernames>,
 }
+
+pub type DropId = i64;
 
 //noinspection ALL
 static MIGRATOR: Migrator = sqlx::migrate!();
@@ -304,12 +307,13 @@ impl OknoId {
         )
     }
     pub async fn check_role(&self, id: UserId, role: Role) -> IdResult<bool> {
-        let (has_role,) =
-            sqlx::query_as("EXISTS SELECT FROM users_roles WHERE user_id = ? AND role = ?")
-                .bind(id.0 as i64)
-                .bind(role.to_db())
-                .fetch_one(&self.pool)
-                .await?;
+        let (has_role,) = sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM users_roles WHERE user_id = ? AND role = ?)",
+        )
+        .bind(id.0 as i64)
+        .bind(role.to_db())
+        .fetch_one(&self.pool)
+        .await?;
 
         Ok(has_role)
     }
@@ -319,15 +323,81 @@ impl OknoId {
     }
 
     pub async fn get_top(&self, offset: u32, limit: u32) -> IdResult<Vec<(UserId, i64, String)>> {
-        sqlx::query_as("SELECT id, reputation, username FROM users ORDER BY reputation DESC LIMIT ? OFFSET ?")
-            .bind(limit)
-            .bind(offset)
+        sqlx::query_as(
+            "SELECT id, reputation, username FROM users ORDER BY reputation DESC LIMIT ? OFFSET ?",
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch(&self.pool)
+        .map(|res| {
+            let (id, rep, username) = res?;
+            Ok((UserId(id), rep, username))
+        })
+        .try_collect()
+        .await
+    }
+
+    pub async fn get_users_by_role(&self, role: Role) -> IdResult<Vec<UserId>> {
+        sqlx::query_as::<_, (u64,)>("SELECT user_id FROM users_roles WHERE role = ?")
+            .bind(role.to_db())
             .fetch(&self.pool)
-            .map(|res| {
-                let (id, rep, username) = res?;
-                Ok((UserId(id), rep, username))
-            })
+            .map(|id| Ok(UserId(id?.0)))
             .try_collect()
             .await
+    }
+    pub async fn get_latest_drops(&self, limit: u32) -> IdResult<Vec<(DropId, String)>> {
+        sqlx::query_as("SELECT id, link FROM drops ORDER BY id DESC LIMIT ?")
+            .bind(limit)
+            .fetch(&self.pool)
+            .try_collect()
+            .await
+            .map_err(IdError::from)
+    }
+    pub async fn add_drop(&self, link: &str) -> IdResult<DropId> {
+        sqlx::query_as("INSERT INTO drops (link) VALUES (?) RETURNING id")
+            .bind(link)
+            .fetch_one(&self.pool)
+            .await
+            .map(|(id,)| id)
+            .map_err(IdError::from)
+    }
+    pub async fn get_drop(&self, id: DropId) -> IdResult<String> {
+        sqlx::query_as("SELECT link FROM drops WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
+            .map(|(id,)| id)
+            .map_err(IdError::from)
+    }
+
+    /// returns true if drop hadn't been completed by user
+    pub async fn mark_drop_completed(&self, id: DropId, user: UserId) -> IdResult<bool> {
+        sqlx::query("INSERT OR IGNORE INTO drops_accepted (user_id, drop_id) VALUES (?, ?)")
+            .bind(user.0 as i64)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map(|res| res.rows_affected() == 1)
+            .map_err(IdError::from)
+    }
+    pub async fn check_drop_completed(&self, id: DropId, user: UserId) -> IdResult<bool> {
+        sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM drops_accepted WHERE user_id = ? AND drop_id = ?)",
+        )
+        .bind(user.0 as i64)
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await
+        .map(|(completed,)| completed)
+        .map_err(IdError::from)
+    }
+
+    pub async fn check_drop_exists(&self, id: DropId) -> IdResult<bool> {
+        sqlx::query_as("SELECT EXISTS(SELECT 1 FROM drops WHERE id = ?)")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
+            .map(|(exists,)| exists)
+            .map_err(IdError::from)
     }
 }

@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use crate::{
     bot::{
         args::{Mention, get_args},
@@ -12,14 +11,16 @@ use crate::{
 use anyhow::{anyhow, bail};
 use itertools::Itertools;
 use log::error;
-use std::sync::Arc;
+use std::{fmt::Write, sync::Arc};
 use teloxide::{
     Bot,
     payloads::SendMessageSetters,
     prelude::{CallbackQuery, ChatId, Message, Requester, UserId},
-    types::{ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, User},
+    types::{
+        ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, ParseMode,
+        User,
+    },
 };
-use teloxide::types::ParseMode;
 
 pub async fn usernames_inspect(message: Message, db: Arc<OknoId>) {
     if let Some(User {
@@ -337,10 +338,19 @@ pub async fn on_top(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow::Resu
     let mut text = "<b>Таблица репутации OknoMembers:</b>\n".to_string();
     for (i, (_, rep, username)) in top_data.into_iter().enumerate() {
         match i {
-            0 => writeln!(&mut text, "&gt; <tg-emoji emoji-id=\"5388614717164005740\">🪷</tg-emoji> <b>{username}</b> - {rep} rep.")?,
-            1 => writeln!(&mut text, "&gt; <tg-emoji emoji-id=\"5388967879439852799\">🌸</tg-emoji> <b>{username}</b> - {rep} rep.")?,
-            2 => writeln!(&mut text, "&gt; <tg-emoji emoji-id=\"5388956849963837711\">🌸</tg-emoji> <b>{username}</b> - {rep} rep.")?,
-            _ => writeln!(&mut text, "&gt; <b>{username}</b> - {rep} rep.")?
+            0 => writeln!(
+                &mut text,
+                "&gt; <tg-emoji emoji-id=\"5388614717164005740\">🪷</tg-emoji> <b>{username}</b> - {rep} rep."
+            )?,
+            1 => writeln!(
+                &mut text,
+                "&gt; <tg-emoji emoji-id=\"5388967879439852799\">🌸</tg-emoji> <b>{username}</b> - {rep} rep."
+            )?,
+            2 => writeln!(
+                &mut text,
+                "&gt; <tg-emoji emoji-id=\"5388956849963837711\">🌸</tg-emoji> <b>{username}</b> - {rep} rep."
+            )?,
+            _ => writeln!(&mut text, "&gt; <b>{username}</b> - {rep} rep.")?,
         }
     }
 

@@ -1,3 +1,4 @@
+use crate::oknoid::DropId;
 use std::sync::Arc;
 use teloxide::{dispatching::dialogue::InMemStorage, prelude::Dialogue};
 
@@ -8,6 +9,9 @@ pub enum SessionState {
     WaitBioMessage,
     WaitSupportMessage {
         category: Arc<String>,
+    },
+    WaitUnitReport {
+        drop_id: DropId,
     },
 }
 
