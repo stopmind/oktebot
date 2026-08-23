@@ -1,7 +1,6 @@
 use crate::{
-    bot::scheme::{
-        BIO_CALLBACK, HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK, UNIT_INFO_CALLBACK,
-    },
+    bot::scheme::{HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK, UNIT_INFO_CALLBACK},
+    config::Config,
     oknoid::OknoId,
 };
 use anyhow::{anyhow, bail};
@@ -11,7 +10,8 @@ use teloxide::{
     dispatching::dialogue::GetChatId,
     prelude::*,
     types::{
-        BotCommand, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, ParseMode,
+        BotCommand, Chat, ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind,
+        InlineKeyboardMarkup, InputFile, ParseMode,
     },
 };
 
@@ -60,7 +60,7 @@ pub async fn send_help_message(
         /bio - установить описание профиля.\n\
         /top - топ пользователей по репутации.\n\
         /unit - информация о OKNO Unit.\n\
-        /unit_report <code>&lt;drop id&gt;</code> - подать заявку по id дропа.\n\
+        /feedback <code>&lt;drop id&gt;</code> - оставить фидбек по id дропа.\n\
     "
     .to_owned();
 
@@ -116,62 +116,75 @@ pub async fn on_help_command(bot: Bot, db: Arc<OknoId>, message: Message) -> any
 pub async fn set_commands(bot: &Bot) -> anyhow::Result<()> {
     bot.set_my_commands([
         BotCommand::new("help", "полная справка"),
-        BotCommand::new("main_menu", "главное меню"),
-        BotCommand::new(
-            "support",
-            "отправить сообщение в тех поддержку, работает только в ЛС",
-        ),
+        BotCommand::new("menu", "главное меню"),
+        BotCommand::new("support", "отправить сообщение в тех поддержку"),
         BotCommand::new("me", "показать свой профиль"),
         BotCommand::new("bio", "установить описание профиля"),
         BotCommand::new("top", "топ пользователей по репутации"),
-        BotCommand::new("unit", "информация о OKNO Unit"),
+        BotCommand::new("unit", "информация о OknoUnit"),
     ])
     .await?;
 
     Ok(())
 }
 
-pub async fn main_menu(bot: &Bot, chat_id: ChatId) -> anyhow::Result<()> {
-    bot.send_message(chat_id, "\
-        OknoServant - это ваш помощник в нашем комьюнити. Система репутации, OknoUnit, редактирование сабмитов и тех.поддержка - все в одном месте.\n\
+pub async fn main_menu(bot: &Bot, config: &Config, chat: &Chat) -> anyhow::Result<()> {
+    if !matches!(chat.kind, ChatKind::Private(..)) {
+        bot.send_message(
+            chat.id,
+            "Команда может быть использована только в личных сообщениях.",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let text = "\
+        <b>OknoServant</b> - это ваш <b>помощник</b> в нашем <b>комьюнити</b>. Система <b>репутации</b>, <b>OknoUnit</b> и <b>тех.поддержка</b> - все в одном месте.\n\
         \n\
-        С чем я могу вам помочь?")
+        <i>С чем я могу вам помочь?</i>";
+
+    bot.send_photo(chat.id, InputFile::file_id(config.banners.main.clone()))
+        .caption(text)
         .reply_markup(InlineKeyboardMarkup::new([
+            vec![InlineKeyboardButton::callback(
+                "Топ OknoMembers",
+                TOP_CALLBACK,
+            )],
             vec![
-                InlineKeyboardButton::url("ТГК OKNO", "https://t.me/oknogmdv".parse()?),
-                InlineKeyboardButton::url("OKNOWEB", "https://oknoweb.ru".parse()?),
+                InlineKeyboardButton::callback("OknoUnit", UNIT_INFO_CALLBACK),
+                InlineKeyboardButton::callback("Тех. поддержка", SUPPORT_CALLBACK),
             ],
             vec![
-                InlineKeyboardButton::callback("Мой профиль", ME_CALLBACK),
-                InlineKeyboardButton::callback("Поддержка", SUPPORT_CALLBACK),
+                InlineKeyboardButton::url("t.me/oknogmdv", "https://t.me/oknogmdv".parse()?),
+                InlineKeyboardButton::url("oknoweb.ru", "https://oknoweb.ru".parse()?),
             ],
-            vec![InlineKeyboardButton::callback(
-                "Изменить описание профиля",
-                BIO_CALLBACK,
-            )],
-            vec![InlineKeyboardButton::callback(
-                "ТОП OKNO MEMBERS",
-                TOP_CALLBACK
-            )],
-            vec![InlineKeyboardButton::callback(
-                "OKNO UNIT",
-                UNIT_INFO_CALLBACK,
-            )],
+            vec![InlineKeyboardButton::callback("Мой профиль", ME_CALLBACK)],
         ]))
+        .parse_mode(ParseMode::Html)
         .await?;
 
     Ok(())
 }
-pub async fn main_menu_command(bot: Bot, message: Message) -> anyhow::Result<()> {
-    main_menu(&bot, message.chat.id).await
+pub async fn main_menu_command(
+    bot: Bot,
+    config: Arc<Config>,
+    message: Message,
+) -> anyhow::Result<()> {
+    main_menu(&bot, &config, &message.chat).await
 }
 
-pub async fn main_menu_callback(bot: Bot, callback: CallbackQuery) -> anyhow::Result<()> {
-    let chat_id = callback
-        .chat_id()
+pub async fn main_menu_callback(
+    bot: Bot,
+    config: Arc<Config>,
+    callback: CallbackQuery,
+) -> anyhow::Result<()> {
+    let chat = callback
+        .message
+        .as_ref()
+        .map(|m| m.chat())
         .ok_or_else(|| anyhow!("failed to get chat id from callback"))?;
 
-    main_menu(&bot, chat_id).await?;
+    main_menu(&bot, &config, chat).await?;
     bot.answer_callback_query(callback.id).await?;
     Ok(())
 }

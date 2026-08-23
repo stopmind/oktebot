@@ -9,15 +9,20 @@ use anyhow::{Result, anyhow, bail};
 use std::sync::Arc;
 use teloxide::{
     prelude::{Message, *},
-    types::{Chat, ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup},
+    types::{
+        Chat, ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup,
+        InputFile, ParseMode,
+    },
 };
 
 async fn support(bot: &Bot, config: &Config, chat: &Chat) -> Result<()> {
     if matches!(chat.kind, ChatKind::Private(..)) {
-        bot.send_message(chat.id, "\
-            Здесь вы можете обратится напрямую к администрации бота и oknoweb.ru. ВСЕ обращения будут рассмотрены.\n\
+        bot.send_photo(chat.id, InputFile::file_id(config.banners.support.clone()))
+            .caption("\
+            Здесь вы можете обратится напрямую к <b>администрации</b> бота и oknoweb.ru. <b>ВСЕ</b> обращения будут рассмотрены.\n\
             \n\
-            На какую тему ваше обращение?")
+            <i>На какую тему ваше обращение?</i>")
+            .parse_mode(ParseMode::Html)
             .reply_markup(InlineKeyboardMarkup::new(
                 config.support_categories_layout.iter().map(|row| {
                     row.iter().map(|i| {

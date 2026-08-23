@@ -29,10 +29,10 @@ pub const BIO_CALLBACK: &str = "bio";
 pub const PROFILE_CALLBACK_PREFIX: &str = "profile";
 pub const SUPPORT_SELECTED_CALLBACK_PREFIX: &str = "support-selected";
 pub const UNIT_JOIN_CALLBACK: &str = "unit-join";
-pub const UNIT_REPORT_CALLBACK_PREFIX: &str = "unit-report";
-pub const UNIT_ACCEPT_REPORT_CALLBACK_PREFIX: &str = "unit-accept";
+pub const UNIT_FEEDBACK_CALLBACK_PREFIX: &str = "unit-feedback";
+pub const UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX: &str = "unit-accept";
 pub const DROPS_HISTORY_CALLBACK: &str = "drops-history";
-pub const MAIN_MENU_CALLBACK: &str = "main-menu";
+pub const MENU_CALLBACK: &str = "menu";
 pub const SUPPORT_CALLBACK: &str = "support";
 pub const ME_CALLBACK: &str = "me";
 pub const UNIT_INFO_CALLBACK: &str = "unit-info";
@@ -57,9 +57,9 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         .branch(case![Command::Rep].endpoint(change_rep))
                         .branch(case![Command::Top].endpoint(top_command))
                         .branch(case![Command::Unit].endpoint(unit_info_command))
-                        .branch(case![Command::UnitReport].endpoint(unit_report_command))
+                        .branch(case![Command::Feedback].endpoint(unit_report_command))
                         .branch(case![Command::Drop].endpoint(drop_command))
-                        .branch(case![Command::MainMenu].endpoint(main_menu_command)),
+                        .branch(case![Command::Menu].endpoint(main_menu_command)),
                 )
                 .branch(
                     case![SessionState::WaitSupportMessage { category }]
@@ -87,9 +87,7 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                 )
                 .branch(filter(utils::callback_filter(HELP_CALLBACK)).endpoint(on_help_callback))
                 .branch(filter(utils::callback_filter(BIO_CALLBACK)).endpoint(on_bio_callback))
-                .branch(
-                    filter(utils::callback_filter(MAIN_MENU_CALLBACK)).endpoint(main_menu_callback),
-                )
+                .branch(filter(utils::callback_filter(MENU_CALLBACK)).endpoint(main_menu_callback))
                 .branch(
                     filter(utils::callback_filter(UNIT_INFO_CALLBACK)).endpoint(unit_info_callback),
                 )
@@ -113,12 +111,12 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                     .endpoint(on_support_selected_callback),
                 )
                 .branch(
-                    filter(utils::callback_prefix_filter(UNIT_REPORT_CALLBACK_PREFIX))
+                    filter(utils::callback_prefix_filter(UNIT_FEEDBACK_CALLBACK_PREFIX))
                         .endpoint(unit_report_callback),
                 )
                 .branch(
                     filter(utils::callback_prefix_filter(
-                        UNIT_ACCEPT_REPORT_CALLBACK_PREFIX,
+                        UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX,
                     ))
                     .endpoint(unit_accept_report_callback),
                 )

@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use teloxide::types::{ChatId, UserId};
+use teloxide::types::{ChatId, FileId, UserId};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -17,11 +17,20 @@ pub enum ConfigLoadError {
 }
 
 #[derive(Deserialize)]
+pub struct Banners {
+    pub main: FileId,
+    pub unit: FileId,
+    pub support: FileId,
+    pub top: FileId,
+}
+
+#[derive(Deserialize)]
 pub struct Config {
     pub token: String,
     pub support_chat: ChatId,
     pub support_categories: Vec<Arc<String>>,
     pub support_categories_layout: Vec<Vec<usize>>,
+    pub banners: Banners,
     #[serde(default)]
     pub super_admins: BTreeSet<UserId>,
     #[serde(default = "default_storage_path")]

@@ -1,4 +1,12 @@
-use teloxide::types::CallbackQuery;
+use teloxide::types::{CallbackQuery, LinkPreviewOptions};
+
+pub const DISABLE_PREVIEW_OPTIONS: LinkPreviewOptions = LinkPreviewOptions {
+    is_disabled: true,
+    url: None,
+    prefer_small_media: false,
+    prefer_large_media: false,
+    show_above_text: false,
+};
 
 /// Requires CallbackQuery
 pub fn callback_filter(

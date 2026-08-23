@@ -14,7 +14,7 @@ pub enum Command {
     Rep,
     Top,
     Unit,
-    UnitReport,
+    Feedback,
     Drop,
-    MainMenu,
+    Menu,
 }
