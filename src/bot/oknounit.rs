@@ -8,6 +8,7 @@ use crate::{
             UNIT_JOIN_CALLBACK,
         },
         session::{Session, SessionState},
+        utils::menu_button,
     },
     config::Config,
     oknoid::{DropId, OknoId, Role},
@@ -66,7 +67,8 @@ async fn unit_info(
                 .chain(iter::once([InlineKeyboardButton::new(
                     "История дропов",
                     InlineKeyboardButtonKind::CallbackData(DROPS_HISTORY_CALLBACK.to_string()),
-                )])),
+                )]))
+                .chain(iter::once([menu_button()])),
         );
 
         bot.send_photo(chat_id, InputFile::file_id(config.banners.unit.clone()))
@@ -76,14 +78,15 @@ async fn unit_info(
     } else {
         bot.send_photo(chat_id,  InputFile::file_id(config.banners.unit.clone()))
             .caption("\
-                OknoUnit - Это статус боевой единицы нашего сообщества. Задача каждого OknoUnit`а - проявлять активность на дропах.\n\
+                <b>OknoUnit</b> - Это статус <b>боевой единицы</b> нашего сообщества. Задача каждого OknoUnit`а - <b>проявлять активность на дропах.</b>\n\
                 \n\
-                Дроп - это любое видео, игра или другая единица контента от нашего сообщества.\n\
+                > <b>Дроп</b> - это любое <b>видео</b>, <b>игра</b> или другая единица <b>контента</b> от нашего сообщества.\n\
                 \n\
-                За каждый комментарий/отзыв ваша репутация повышается. OknoUnit - один из самых эффективных способов нафармить репутацию.\n\
+                > За <b>каждый комментарий/отзыв</b> ваша <b>репутация повышается</b>. <b>OknoUnit</b> - один из самых <b>эффективных способов</b> нафармить <b>репутацию.</b>\n\
                 \n\
-                Будучи OknoUnit вы будете получать уведомления о новых дропах первыми.\
+                > Каждый <b>OknoUnit</b> получает <b>уведомления о новых дропах</b> сообщества.\
                 ")
+            .parse_mode(ParseMode::Html)
             .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
                 "Стать OknoUnit",
                 InlineKeyboardButtonKind::CallbackData(UNIT_JOIN_CALLBACK.to_string()),
@@ -428,6 +431,7 @@ pub async fn drops_history_callback(
     bot.send_photo(chat_id, InputFile::file_id(config.banners.unit.clone()))
         .caption(text)
         .parse_mode(ParseMode::Html)
+        .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
         .await?;
 
     bot.answer_callback_query(callback.id).await?;

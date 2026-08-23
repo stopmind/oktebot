@@ -1,4 +1,5 @@
-use teloxide::types::{CallbackQuery, LinkPreviewOptions};
+use crate::bot::scheme::MENU_CALLBACK;
+use teloxide::types::{CallbackQuery, InlineKeyboardButton, LinkPreviewOptions};
 
 pub const DISABLE_PREVIEW_OPTIONS: LinkPreviewOptions = LinkPreviewOptions {
     is_disabled: true,
@@ -7,6 +8,10 @@ pub const DISABLE_PREVIEW_OPTIONS: LinkPreviewOptions = LinkPreviewOptions {
     prefer_large_media: false,
     show_above_text: false,
 };
+
+pub fn menu_button() -> InlineKeyboardButton {
+    InlineKeyboardButton::callback("В меню", MENU_CALLBACK)
+}
 
 /// Requires CallbackQuery
 pub fn callback_filter(

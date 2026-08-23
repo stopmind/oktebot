@@ -2,11 +2,12 @@ use crate::{
     bot::{
         scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX, SUPPORT_SELECTED_CALLBACK_PREFIX},
         session::{Session, SessionState},
+        utils::menu_button,
     },
     config::Config,
 };
 use anyhow::{Result, anyhow, bail};
-use std::sync::Arc;
+use std::{iter, sync::Arc};
 use teloxide::{
     prelude::{Message, *},
     types::{
@@ -17,15 +18,12 @@ use teloxide::{
 
 async fn support(bot: &Bot, config: &Config, chat: &Chat) -> Result<()> {
     if matches!(chat.kind, ChatKind::Private(..)) {
-        bot.send_photo(chat.id, InputFile::file_id(config.banners.support.clone()))
-            .caption("\
-            Здесь вы можете обратится напрямую к <b>администрации</b> бота и oknoweb.ru. <b>ВСЕ</b> обращения будут рассмотрены.\n\
-            \n\
-            <i>На какую тему ваше обращение?</i>")
-            .parse_mode(ParseMode::Html)
-            .reply_markup(InlineKeyboardMarkup::new(
-                config.support_categories_layout.iter().map(|row| {
-                    row.iter().map(|i| {
+        let buttons = config
+            .support_categories_layout
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|i| {
                         InlineKeyboardButton::new(
                             config.support_categories[*i].as_ref().clone(),
                             InlineKeyboardButtonKind::CallbackData(format!(
@@ -33,8 +31,17 @@ async fn support(bot: &Bot, config: &Config, chat: &Chat) -> Result<()> {
                             )),
                         )
                     })
-                }),
-            ))
+                    .collect()
+            })
+            .chain(iter::once(vec![menu_button()]));
+
+        bot.send_photo(chat.id, InputFile::file_id(config.banners.support.clone()))
+            .caption("\
+            Здесь вы можете обратится напрямую к <b>администрации</b> бота и oknoweb.ru. <b>ВСЕ</b> обращения будут рассмотрены.\n\
+            \n\
+            <i>На какую тему ваше обращение?</i>")
+            .parse_mode(ParseMode::Html)
+            .reply_markup(InlineKeyboardMarkup::new(buttons))
             .await?;
     } else {
         bot.send_message(
@@ -123,12 +130,12 @@ pub async fn on_support_message(
     bot.forward_message(config.support_chat, message.chat.id, message.id)
         .await?;
     bot.send_message(config.support_chat, format!("Категория: {category}"))
-        .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-            "Описание профиля",
-            InlineKeyboardButtonKind::CallbackData(callback),
-        )]]))
+        .reply_markup(InlineKeyboardMarkup::new([[
+            InlineKeyboardButton::callback("Описание профиля", callback),
+        ]]))
         .await?;
     bot.send_message(message.chat.id, "Сообщение отправлено!")
+        .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
         .await?;
 
     Ok(())
@@ -136,7 +143,9 @@ pub async fn on_support_message(
 
 pub async fn on_support_cancel(bot: Bot, query: CallbackQuery, session: Session) -> Result<()> {
     session.exit().await?;
-    bot.send_message(session.chat_id(), "Отменено.").await?;
+    bot.send_message(session.chat_id(), "Отменено.")
+        .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
+        .await?;
     bot.answer_callback_query(query.id).await?;
     Ok(())
 }

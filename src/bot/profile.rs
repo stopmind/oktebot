@@ -7,6 +7,7 @@ use crate::{
             TOP_CALLBACK_PREFIX,
         },
         session::{Session, SessionState},
+        utils::menu_button,
     },
     config::Config,
     oknoid::{IdError, OknoId, Role, UserInfo},
@@ -149,10 +150,12 @@ pub async fn on_bio_message(
     let result = db.set_bio(user.id, Some(text)).await;
     if let Err(error) = result {
         bot.send_message(message.chat.id, "Не удалось изменить описание.")
+            .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
             .await?;
         Err(error.into())
     } else {
         bot.send_message(message.chat.id, "Описание профиля обновлено.")
+            .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
             .await?;
         Ok(())
     }
@@ -160,7 +163,9 @@ pub async fn on_bio_message(
 
 pub async fn on_bio_cancel(bot: Bot, query: CallbackQuery, session: Session) -> anyhow::Result<()> {
     session.exit().await?;
-    bot.send_message(session.chat_id(), "Отменено.").await?;
+    bot.send_message(session.chat_id(), "Отменено.")
+        .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
+        .await?;
     bot.answer_callback_query(query.id).await?;
     Ok(())
 }
@@ -423,20 +428,25 @@ async fn top(
     }
 
     let next_page_exists = db.users_count().await? > PAGE_SIZE * (page + 1);
-    let markup = InlineKeyboardMarkup::new(iter::chain(
-        (page > 0).then(|| {
-            [InlineKeyboardButton::callback(
-                "< Предыдущая страница",
-                format!("{TOP_CALLBACK_PREFIX}{}", page - 1),
-            )]
-        }),
-        next_page_exists.then(|| {
-            [InlineKeyboardButton::callback(
-                "Следующая страница >",
-                format!("{TOP_CALLBACK_PREFIX}{}", page + 1),
-            )]
-        }),
-    ));
+    let markup = InlineKeyboardMarkup::new(
+        [
+            (page > 0).then(|| {
+                [InlineKeyboardButton::callback(
+                    "< Предыдущая страница",
+                    format!("{TOP_CALLBACK_PREFIX}{}", page - 1),
+                )]
+            }),
+            next_page_exists.then(|| {
+                [InlineKeyboardButton::callback(
+                    "Следующая страница >",
+                    format!("{TOP_CALLBACK_PREFIX}{}", page + 1),
+                )]
+            }),
+            Some([menu_button()]),
+        ]
+        .into_iter()
+        .flatten(),
+    );
 
     bot.send_photo(chat_id, InputFile::file_id(config.banners.top.clone()))
         .caption(text)
