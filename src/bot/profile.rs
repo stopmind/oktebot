@@ -7,13 +7,15 @@ use crate::{
             TOP_CALLBACK_PREFIX,
         },
         session::{Session, SessionState},
-        utils::menu_button,
+        utils::{
+            UtilError, check_private, check_user_privileges, get_callback_chat, get_id_username,
+            menu_button, resolve_mention,
+        },
     },
     config::Config,
     oknoid::{IdError, OknoId, Role, UserInfo},
     parser,
 };
-use anyhow::{anyhow, bail};
 use log::error;
 use std::{fmt::Write, iter, sync::Arc};
 use teloxide::{
@@ -22,18 +24,14 @@ use teloxide::{
     payloads::{SendMessageSetters, SendPhotoSetters},
     prelude::{CallbackQuery, ChatId, Message, Requester, UserId},
     types::{
-        ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, InputFile,
-        ParseMode, User,
+        Chat, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, InputFile,
+        ParseMode,
     },
 };
 
 pub async fn usernames_inspect(message: Message, db: Arc<OknoId>) {
-    if let Some(User {
-        id,
-        username: Some(username),
-        ..
-    }) = message.from.as_ref()
-        && let Err(err) = db.update_username(*id, username.clone()).await
+    if let Ok((id, username)) = get_id_username(message.from.as_ref())
+        && let Err(err) = db.update_username(id, username.to_owned()).await
     {
         error!("Error while updating username: {:?}", err);
     }
@@ -45,17 +43,10 @@ pub async fn on_start(
     message: Message,
     db: Arc<OknoId>,
 ) -> anyhow::Result<()> {
-    let Some(User {
-        id,
-        username: Some(username),
-        ..
-    }) = message.from.as_ref()
-    else {
-        bail!("failed get user or username");
-    };
+    let (id, username) = get_id_username(message.from.as_ref())?;
 
     if let Err(error) = db
-        .register_user(*id, username.clone(), UserInfo::default())
+        .register_user(id, username.to_owned(), UserInfo::default())
         .await
         && !matches!(error, IdError::UserExists(..))
     {
@@ -65,27 +56,24 @@ pub async fn on_start(
     main_menu(&bot, &config, &message.chat).await
 }
 
-pub async fn on_bio(bot: Bot, session: Session, message: Message) -> anyhow::Result<()> {
-    if matches!(message.chat.kind, ChatKind::Private(..)) {
-        session.update(SessionState::WaitBioMessage).await?;
+async fn bio(bot: &Bot, session: &Session, chat: &Chat) -> anyhow::Result<()> {
+    check_private(bot, chat).await?;
+    session.update(SessionState::WaitBioMessage).await?;
 
-        bot.send_message(
-            message.chat.id,
-            "Отправьте описание для профиля следующим сообщением.",
-        )
-        .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-            "Отмена",
-            InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string()),
-        )]]))
-        .await?;
-    } else {
-        bot.send_message(
-            message.chat.id,
-            "Команда может быть использована только в личных сообщениях.",
-        )
-        .await?;
-    }
+    bot.send_message(
+        chat.id,
+        "Отправьте описание для профиля следующим сообщением.",
+    )
+    .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
+        "Отмена",
+        InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string()),
+    )]]))
+    .await?;
+    Ok(())
+}
 
+pub async fn on_bio_command(bot: Bot, session: Session, message: Message) -> anyhow::Result<()> {
+    bio(&bot, &session, &message.chat).await?;
     Ok(())
 }
 
@@ -94,30 +82,8 @@ pub async fn on_bio_callback(
     session: Session,
     callback: CallbackQuery,
 ) -> anyhow::Result<()> {
-    let Some(message) = callback.regular_message() else {
-        bail!("callback message not found");
-    };
-
-    if matches!(message.chat.kind, ChatKind::Private(..)) {
-        session.update(SessionState::WaitBioMessage).await?;
-
-        bot.send_message(
-            message.chat.id,
-            "Отправьте описание для профиля сообщением.",
-        )
-        .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-            "Отмена",
-            InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string()),
-        )]]))
-        .await?;
-    } else {
-        bot.send_message(
-            message.chat.id,
-            "Команда может быть использована только в личных сообщениях.",
-        )
-        .await?;
-    }
-
+    let chat = get_callback_chat(&callback)?;
+    bio(&bot, &session, chat).await?;
     bot.answer_callback_query(callback.id).await?;
     Ok(())
 }
@@ -140,10 +106,7 @@ pub async fn on_bio_message(
         return Ok(());
     }
 
-    let user = message
-        .from
-        .as_ref()
-        .ok_or(anyhow!("Failed to retrieve user"))?;
+    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
 
     session.exit().await?;
 
@@ -159,15 +122,6 @@ pub async fn on_bio_message(
             .await?;
         Ok(())
     }
-}
-
-pub async fn on_bio_cancel(bot: Bot, query: CallbackQuery, session: Session) -> anyhow::Result<()> {
-    session.exit().await?;
-    bot.send_message(session.chat_id(), "Отменено.")
-        .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
-        .await?;
-    bot.answer_callback_query(query.id).await?;
-    Ok(())
 }
 
 async fn send_profile(
@@ -214,7 +168,7 @@ async fn send_profile(
     Ok(())
 }
 
-pub async fn on_info(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+pub async fn on_info_command(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
     let args = get_args(&message);
     if let Some(mention) = parser![Mention](args) {
         let info = match mention {
@@ -244,38 +198,24 @@ pub async fn on_info(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Res
     Ok(())
 }
 
-pub async fn on_me(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
-    let Some(User {
-        id,
-        username: Some(username),
-        ..
-    }) = message.from.as_ref()
-    else {
-        bail!("failed get user or username");
-    };
+pub async fn on_me_command(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+    let (id, username) = get_id_username(message.from.as_ref())?;
 
-    send_profile(
-        &bot,
-        &db,
-        message.chat.id,
-        *id,
-        username.as_str(),
-        true,
-        false,
-    )
-    .await
+    send_profile(&bot, &db, message.chat.id, id, username, true, false).await
 }
 
-pub async fn me_callback(bot: Bot, db: Arc<OknoId>, callback: CallbackQuery) -> anyhow::Result<()> {
-    let chat_id = callback
-        .chat_id()
-        .ok_or_else(|| anyhow!("Failed to get callback chat id"))?;
+pub async fn on_me_callback(
+    bot: Bot,
+    db: Arc<OknoId>,
+    callback: CallbackQuery,
+) -> anyhow::Result<()> {
+    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
 
     let username = callback
         .from
         .username
         .as_deref()
-        .ok_or_else(|| anyhow!("Failed to get username"))?;
+        .ok_or(UtilError::FailedGetUser)?;
 
     send_profile(&bot, &db, chat_id, callback.from.id, username, true, true).await?;
     bot.answer_callback_query(callback.id).await?;
@@ -287,47 +227,34 @@ pub async fn on_profile_callback(
     db: Arc<OknoId>,
     callback: CallbackQuery,
 ) -> anyhow::Result<()> {
-    let message = callback
-        .regular_message()
-        .ok_or_else(|| anyhow!("callback message not found"))?;
+    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
 
     let callback_data = callback
         .data
         .as_ref()
-        .ok_or_else(|| anyhow!("callback not found"))?;
+        .ok_or(UtilError::FailedParseCallbackData)?;
 
-    let id = callback_data[PROFILE_CALLBACK_PREFIX.len()..]
+    let user_id = callback_data[PROFILE_CALLBACK_PREFIX.len()..]
         .parse()
-        .map_err(|_| anyhow!("failed to parse callback data: {}", callback_data))
+        .map_err(|_| UtilError::FailedParseCallbackData)
         .map(UserId)?;
 
-    let username = db
-        .get_username(id)
-        .ok_or_else(|| anyhow!("username not found, user_id: {id}"))?;
+    let username = db.get_username(user_id).ok_or(UtilError::FailedGetUser)?;
 
-    send_profile(
-        &bot,
-        &db,
-        message.chat.id,
-        id,
-        username.as_str(),
-        false,
-        false,
-    )
-    .await?;
+    send_profile(&bot, &db, chat_id, user_id, username.as_str(), false, false).await?;
     bot.answer_callback_query(callback.id).await?;
 
     Ok(())
 }
 
-pub async fn add_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+pub async fn on_add_admin_command(
+    bot: Bot,
+    message: Message,
+    db: Arc<OknoId>,
+) -> anyhow::Result<()> {
     let args = get_args(&message);
     if let Some(mention) = parser![Mention](args) {
-        let Some(id) = mention.resolve(&db) else {
-            bot.send_message(message.chat.id, "Пользователь не найден!")
-                .await?;
-            return Ok(());
-        };
+        let id = resolve_mention(&bot, &db, message.chat.id, &mention).await?;
 
         if db.give_role(id, Role::Admin).await? {
             bot.send_message(message.chat.id, "Пользователь назначен админом.")
@@ -342,14 +269,10 @@ pub async fn add_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::R
     Ok(())
 }
 
-pub async fn del_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+pub async fn on_del_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
     let args = get_args(&message);
     if let Some(mention) = parser![Mention](args) {
-        let Some(id) = mention.resolve(&db) else {
-            bot.send_message(message.chat.id, "Пользователь не найден!")
-                .await?;
-            return Ok(());
-        };
+        let id = resolve_mention(&bot, &db, message.chat.id, &mention).await?;
 
         if db.take_role(id, Role::Admin).await? {
             bot.send_message(message.chat.id, "Пользователь более не является админом.")
@@ -365,25 +288,14 @@ pub async fn del_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::R
     Ok(())
 }
 
-pub async fn change_rep(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
-    let Some(User { id: user_id, .. }) = message.from else {
-        bail!("Failed get user id");
-    };
+pub async fn on_change_rep(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
 
-    if !db.check_user_privileges(user_id).await? {
-        bot.send_message(message.chat.id, "У вас недостаточно прав")
-            .await?;
-        return Ok(());
-    }
+    check_user_privileges(&bot, &db, user.id, message.chat.id).await?;
 
     let args = get_args(&message);
     if let Some((mention, value)) = parser![Mention, i64](args) {
-        let Some(target_id) = mention.resolve(&db) else {
-            bot.send_message(message.chat.id, "Неизвестный пользователь")
-                .await?;
-            return Ok(());
-        };
-
+        let target_id = resolve_mention(&bot, &db, message.chat.id, &mention).await?;
         let new_rep = db.add_reputation(target_id, value).await?;
 
         bot.send_message(message.chat.id, format!("Обновленная репутация: {new_rep}"))
@@ -457,7 +369,7 @@ async fn top(
     Ok(())
 }
 
-pub async fn top_command(
+pub async fn on_top_command(
     bot: Bot,
     db: Arc<OknoId>,
     config: Arc<Config>,
@@ -466,22 +378,16 @@ pub async fn top_command(
     top(&bot, &db, &config, message.chat.id, 0).await
 }
 
-pub async fn top_callback(
+pub async fn on_top_callback(
     bot: Bot,
     db: Arc<OknoId>,
     config: Arc<Config>,
     callback: CallbackQuery,
 ) -> anyhow::Result<()> {
-    let chat_id = callback
-        .chat_id()
-        .ok_or_else(|| anyhow!("Failed to get callback chat id"))?;
-    let data = callback
-        .data
-        .as_deref()
-        .ok_or_else(|| anyhow!("callback data not found"))?;
+    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
+    let data = callback.data.as_deref().ok_or(UtilError::NoCallbackData)?;
 
     let page = data[TOP_CALLBACK_PREFIX.len()..].parse()?;
-
     top(&bot, &db, &config, chat_id, page).await?;
     bot.answer_callback_query(callback.id).await?;
     Ok(())

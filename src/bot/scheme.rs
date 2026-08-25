@@ -1,16 +1,16 @@
 use crate::bot::{
     command::Command,
-    main_menu_callback, main_menu_command,
     oknounit::{
-        drop_command, drops_history_callback, on_unit_report_cancel, on_unit_report_message,
-        unit_accept_report_callback, unit_info_callback, unit_info_command, unit_join_callback,
-        unit_report_callback, unit_report_command,
+        on_drop_command, on_drops_history_callback, on_unit_accept_report_callback,
+        on_unit_info_callback, on_unit_info_command, on_unit_join_callback,
+        on_unit_report_callback, on_unit_report_command, on_unit_report_message,
     },
-    on_help_callback, on_help_command,
+    on_cancel_callback, on_help_callback, on_help_command, on_main_menu_callback,
+    on_main_menu_command,
     profile::{
-        add_admin, change_rep, del_admin, me_callback, on_bio, on_bio_callback, on_bio_cancel,
-        on_bio_message, on_info, on_me, on_profile_callback, on_start, top_callback, top_command,
-        usernames_inspect,
+        on_add_admin_command, on_bio_callback, on_bio_command, on_bio_message, on_change_rep,
+        on_del_admin, on_info_command, on_me_callback, on_me_command, on_profile_callback,
+        on_start, on_top_callback, on_top_command, usernames_inspect,
     },
     session::SessionState,
     support::*,
@@ -48,18 +48,18 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                     filter_command::<Command, _>()
                         .branch(case![Command::Start].endpoint(on_start))
                         .branch(case![Command::Help].endpoint(on_help_command))
-                        .branch(case![Command::Support].endpoint(on_support))
-                        .branch(case![Command::Bio].endpoint(on_bio))
-                        .branch(case![Command::Info].endpoint(on_info))
-                        .branch(case![Command::Me].endpoint(on_me))
-                        .branch(case![Command::AdminAdd].endpoint(add_admin))
-                        .branch(case![Command::AdminDel].endpoint(del_admin))
-                        .branch(case![Command::Rep].endpoint(change_rep))
-                        .branch(case![Command::Top].endpoint(top_command))
-                        .branch(case![Command::Unit].endpoint(unit_info_command))
-                        .branch(case![Command::Feedback].endpoint(unit_report_command))
-                        .branch(case![Command::Drop].endpoint(drop_command))
-                        .branch(case![Command::Menu].endpoint(main_menu_command)),
+                        .branch(case![Command::Support].endpoint(on_support_command))
+                        .branch(case![Command::Bio].endpoint(on_bio_command))
+                        .branch(case![Command::Info].endpoint(on_info_command))
+                        .branch(case![Command::Me].endpoint(on_me_command))
+                        .branch(case![Command::AdminAdd].endpoint(on_add_admin_command))
+                        .branch(case![Command::AdminDel].endpoint(on_del_admin))
+                        .branch(case![Command::Rep].endpoint(on_change_rep))
+                        .branch(case![Command::Top].endpoint(on_top_command))
+                        .branch(case![Command::Unit].endpoint(on_unit_info_command))
+                        .branch(case![Command::Feedback].endpoint(on_unit_report_command))
+                        .branch(case![Command::Drop].endpoint(on_drop_command))
+                        .branch(case![Command::Menu].endpoint(on_main_menu_command)),
                 )
                 .branch(
                     case![SessionState::WaitSupportMessage { category }]
@@ -74,31 +74,28 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
         .branch(
             Update::filter_callback_query()
                 .branch(
-                    filter(utils::callback_filter(CANCEL_CALLBACK))
-                        .branch(
-                            case![SessionState::WaitSupportMessage { category }]
-                                .endpoint(on_support_cancel),
-                        )
-                        .branch(case![SessionState::WaitBioMessage].endpoint(on_bio_cancel))
-                        .branch(
-                            case![SessionState::WaitUnitReport { drop_id }]
-                                .endpoint(on_unit_report_cancel),
-                        ),
+                    filter(utils::callback_filter(CANCEL_CALLBACK)).endpoint(on_cancel_callback),
                 )
                 .branch(filter(utils::callback_filter(HELP_CALLBACK)).endpoint(on_help_callback))
                 .branch(filter(utils::callback_filter(BIO_CALLBACK)).endpoint(on_bio_callback))
-                .branch(filter(utils::callback_filter(MENU_CALLBACK)).endpoint(main_menu_callback))
                 .branch(
-                    filter(utils::callback_filter(UNIT_INFO_CALLBACK)).endpoint(unit_info_callback),
+                    filter(utils::callback_filter(MENU_CALLBACK)).endpoint(on_main_menu_callback),
                 )
-                .branch(filter(utils::callback_filter(ME_CALLBACK)).endpoint(me_callback))
-                .branch(filter(utils::callback_filter(SUPPORT_CALLBACK)).endpoint(support_callback))
                 .branch(
-                    filter(utils::callback_filter(UNIT_JOIN_CALLBACK)).endpoint(unit_join_callback),
+                    filter(utils::callback_filter(UNIT_INFO_CALLBACK))
+                        .endpoint(on_unit_info_callback),
+                )
+                .branch(filter(utils::callback_filter(ME_CALLBACK)).endpoint(on_me_callback))
+                .branch(
+                    filter(utils::callback_filter(SUPPORT_CALLBACK)).endpoint(on_support_callback),
+                )
+                .branch(
+                    filter(utils::callback_filter(UNIT_JOIN_CALLBACK))
+                        .endpoint(on_unit_join_callback),
                 )
                 .branch(
                     filter(utils::callback_filter(DROPS_HISTORY_CALLBACK))
-                        .endpoint(drops_history_callback),
+                        .endpoint(on_drops_history_callback),
                 )
                 .branch(
                     filter(utils::callback_prefix_filter(PROFILE_CALLBACK_PREFIX))
@@ -112,17 +109,17 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                 )
                 .branch(
                     filter(utils::callback_prefix_filter(UNIT_FEEDBACK_CALLBACK_PREFIX))
-                        .endpoint(unit_report_callback),
+                        .endpoint(on_unit_report_callback),
                 )
                 .branch(
                     filter(utils::callback_prefix_filter(
                         UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX,
                     ))
-                    .endpoint(unit_accept_report_callback),
+                    .endpoint(on_unit_accept_report_callback),
                 )
                 .branch(
                     filter(utils::callback_prefix_filter(TOP_CALLBACK_PREFIX))
-                        .endpoint(top_callback),
+                        .endpoint(on_top_callback),
                 ),
         )
 }

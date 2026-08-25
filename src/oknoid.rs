@@ -409,4 +409,12 @@ impl OknoId {
             .map(|(count,)| count)
             .map_err(IdError::from)
     }
+
+    pub fn check_user_exists(&self, user: UserId) -> bool {
+        self.usernames
+            .lock()
+            .unwrap()
+            .id_to_username
+            .contains_key(&user)
+    }
 }

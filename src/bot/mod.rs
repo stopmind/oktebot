@@ -1,18 +1,18 @@
 use crate::{
-    bot::scheme::{HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK, UNIT_INFO_CALLBACK},
+    bot::{
+        scheme::{HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK, UNIT_INFO_CALLBACK},
+        session::Session,
+        utils::{UtilError, check_private, get_callback_chat, menu_button},
+    },
     config::Config,
     oknoid::OknoId,
 };
-use anyhow::{anyhow, bail};
 use std::sync::Arc;
 use teloxide::{
     RequestError,
     dispatching::dialogue::GetChatId,
     prelude::*,
-    types::{
-        BotCommand, Chat, ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind,
-        InlineKeyboardMarkup, InputFile, ParseMode,
-    },
+    types::{BotCommand, Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode},
 };
 
 mod args;
@@ -27,13 +27,25 @@ pub mod utils;
 pub async fn invalid_usage_message(bot: &Bot, chat_id: ChatId) -> Result<(), RequestError> {
     bot.send_message(
         chat_id,
-        "Неправильное использование комманды. Ознакомтесь со справкой.",
+        "Неправильное использование команды. Ознакомьтесь со справкой.",
     )
-    .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-        "Справка",
-        InlineKeyboardButtonKind::CallbackData(HELP_CALLBACK.to_string()),
-    )]]))
+    .reply_markup(InlineKeyboardMarkup::new([[
+        InlineKeyboardButton::callback("Справка", HELP_CALLBACK),
+    ]]))
     .await?;
+    Ok(())
+}
+
+pub async fn on_cancel_callback(
+    bot: Bot,
+    query: CallbackQuery,
+    session: Session,
+) -> anyhow::Result<()> {
+    session.exit().await?;
+    bot.send_message(session.chat_id(), "Отменено.")
+        .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
+        .await?;
+    bot.answer_callback_query(query.id).await?;
     Ok(())
 }
 
@@ -95,28 +107,23 @@ pub async fn on_help_callback(
 ) -> anyhow::Result<()> {
     bot.answer_callback_query(callback.id.clone()).await?;
 
-    let Some(chat_id) = callback.chat_id() else {
-        return Ok(());
-    };
-    send_help_message(&bot, chat_id, &db, callback.from.id).await?;
+    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
 
+    send_help_message(&bot, chat_id, &db, callback.from.id).await?;
     Ok(())
 }
 
 pub async fn on_help_command(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow::Result<()> {
-    let Some(user) = message.from else {
-        bail!("failed tp get user")
-    };
+    let user = message.from.ok_or(UtilError::FailedGetUser)?;
 
     send_help_message(&bot, message.chat.id, &db, user.id).await?;
-
     Ok(())
 }
 
 pub async fn set_commands(bot: &Bot) -> anyhow::Result<()> {
     bot.set_my_commands([
-        BotCommand::new("help", "полная справка"),
         BotCommand::new("menu", "главное меню"),
+        BotCommand::new("help", "полная справка"),
         BotCommand::new("support", "отправить сообщение в тех поддержку"),
         BotCommand::new("me", "показать свой профиль"),
         BotCommand::new("bio", "установить описание профиля"),
@@ -129,14 +136,7 @@ pub async fn set_commands(bot: &Bot) -> anyhow::Result<()> {
 }
 
 pub async fn main_menu(bot: &Bot, config: &Config, chat: &Chat) -> anyhow::Result<()> {
-    if !matches!(chat.kind, ChatKind::Private(..)) {
-        bot.send_message(
-            chat.id,
-            "Команда может быть использована только в личных сообщениях.",
-        )
-        .await?;
-        return Ok(());
-    }
+    check_private(bot, chat).await?;
 
     let text = "\
         <b>OknoServant</b> - это ваш <b>помощник</b> в нашем <b>комьюнити</b>. Система <b>репутации</b>, <b>OknoUnit</b> и <b>тех.поддержка</b> - все в одном месте.\n\
@@ -165,7 +165,7 @@ pub async fn main_menu(bot: &Bot, config: &Config, chat: &Chat) -> anyhow::Resul
 
     Ok(())
 }
-pub async fn main_menu_command(
+pub async fn on_main_menu_command(
     bot: Bot,
     config: Arc<Config>,
     message: Message,
@@ -173,17 +173,12 @@ pub async fn main_menu_command(
     main_menu(&bot, &config, &message.chat).await
 }
 
-pub async fn main_menu_callback(
+pub async fn on_main_menu_callback(
     bot: Bot,
     config: Arc<Config>,
     callback: CallbackQuery,
 ) -> anyhow::Result<()> {
-    let chat = callback
-        .message
-        .as_ref()
-        .map(|m| m.chat())
-        .ok_or_else(|| anyhow!("failed to get chat id from callback"))?;
-
+    let chat = get_callback_chat(&callback)?;
     main_menu(&bot, &config, chat).await?;
     bot.answer_callback_query(callback.id).await?;
     Ok(())

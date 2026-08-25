@@ -1,13 +1,13 @@
-use crate::bot::scheme::MENU_CALLBACK;
-use teloxide::types::{CallbackQuery, InlineKeyboardButton, LinkPreviewOptions};
-
-pub const DISABLE_PREVIEW_OPTIONS: LinkPreviewOptions = LinkPreviewOptions {
-    is_disabled: true,
-    url: None,
-    prefer_small_media: false,
-    prefer_large_media: false,
-    show_above_text: false,
+use crate::{
+    bot::{args::Mention, scheme::MENU_CALLBACK},
+    oknoid::{IdError, OknoId},
 };
+use teloxide::{
+    Bot,
+    requests::Requester,
+    types::{CallbackQuery, Chat, ChatId, ChatKind, InlineKeyboardButton, User, UserId},
+};
+use thiserror::Error;
 
 pub fn menu_button() -> InlineKeyboardButton {
     InlineKeyboardButton::callback("В меню", MENU_CALLBACK)
@@ -25,4 +25,115 @@ pub fn callback_prefix_filter(
     id: impl AsRef<str> + Send + Sync + 'static,
 ) -> impl Fn(CallbackQuery) -> bool + Send + Sync + 'static {
     move |query: CallbackQuery| matches!(query.data, Some(query_id) if query_id.starts_with(id.as_ref()))
+}
+
+#[derive(Error, Debug)]
+pub enum UtilError {
+    #[error("failed to get chat info")]
+    FailedGetChat,
+    #[error("failed to get user info")]
+    FailedGetUser,
+    #[error("telegram error: {0}")]
+    TelegramError(#[from] teloxide::RequestError),
+    #[error("no callback data")]
+    NoCallbackData,
+    #[error("failed to parse callback data")]
+    FailedParseCallbackData,
+    #[error("id error: {0}")]
+    IdError(#[from] IdError),
+    #[error("incorrect usage")]
+    UsageError,
+}
+
+pub type UtilResult<T> = Result<T, UtilError>;
+
+pub async fn check_private(bot: &Bot, chat: &Chat) -> UtilResult<()> {
+    if matches!(&chat.kind, ChatKind::Private { .. }) {
+        Ok(())
+    } else {
+        bot.send_message(
+            chat.id,
+            "Действие может быть выполнено только в личных сообщениях.",
+        )
+        .await?;
+        Err(UtilError::UsageError)
+    }
+}
+
+pub fn get_callback_chat(callback: &CallbackQuery) -> UtilResult<&Chat> {
+    callback
+        .message
+        .as_ref()
+        .map(|m| m.chat())
+        .ok_or(UtilError::FailedGetChat)
+}
+
+const NO_RIGHTS_MSG: &str = "У вас недостаточно прав!";
+
+pub async fn check_user_privileges(
+    bot: &Bot,
+    db: &OknoId,
+    user_id: UserId,
+    chat_id: ChatId,
+) -> UtilResult<()> {
+    if db.check_user_privileges(user_id).await? {
+        Ok(())
+    } else {
+        bot.send_message(chat_id, NO_RIGHTS_MSG).await?;
+        Err(UtilError::UsageError)
+    }
+}
+
+pub async fn check_user_super_admin(
+    bot: &Bot,
+    db: &OknoId,
+    user_id: UserId,
+    chat_id: ChatId,
+) -> UtilResult<()> {
+    if db.is_super_admin(user_id) {
+        Ok(())
+    } else {
+        bot.send_message(chat_id, NO_RIGHTS_MSG).await?;
+        Err(UtilError::UsageError)
+    }
+}
+
+pub fn get_id_username(user: Option<&User>) -> UtilResult<(UserId, &str)> {
+    if let Some(User {
+        id,
+        username: Some(username),
+        ..
+    }) = user
+    {
+        Ok((*id, username.as_str()))
+    } else {
+        Err(UtilError::FailedGetUser)
+    }
+}
+
+pub async fn resolve_mention(
+    bot: &Bot,
+    db: &OknoId,
+    chat_id: ChatId,
+    mention: &Mention,
+) -> UtilResult<UserId> {
+    const USER_NOT_FOUND_MSG: &str = "Пользователь не найден!";
+    match mention {
+        Mention::Username(username) => {
+            if let Some(user) = db.resolve_username(username) {
+                Ok(user)
+            } else {
+                bot.send_message(chat_id, USER_NOT_FOUND_MSG).await?;
+                Err(UtilError::UsageError)
+            }
+        }
+        Mention::UserId(id) => {
+            if db.check_user_exists(*id) {
+                Ok(*id)
+            } else {
+                bot.send_message(chat_id, USER_NOT_FOUND_MSG).await?;
+                Err(UtilError::UsageError)
+            }
+        }
+    }
 }

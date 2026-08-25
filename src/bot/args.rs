@@ -1,4 +1,3 @@
-use crate::oknoid::OknoId;
 use std::str::FromStr;
 use teloxide::{prelude::UserId, types::Message};
 use thiserror::Error;
@@ -11,15 +10,6 @@ pub struct InvalidMentionError;
 pub enum Mention {
     Username(String),
     UserId(UserId),
-}
-
-impl Mention {
-    pub fn resolve(&self, db: &OknoId) -> Option<UserId> {
-        match self {
-            Mention::Username(username) => db.resolve_username(username),
-            Mention::UserId(id) => Some(*id),
-        }
-    }
 }
 
 impl FromStr for Mention {

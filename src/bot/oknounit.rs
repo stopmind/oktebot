@@ -8,22 +8,24 @@ use crate::{
             UNIT_JOIN_CALLBACK,
         },
         session::{Session, SessionState},
-        utils::menu_button,
+        utils::{
+            UtilError, check_private, check_user_privileges, check_user_super_admin,
+            get_callback_chat, menu_button,
+        },
     },
     config::Config,
     oknoid::{DropId, OknoId, Role},
 };
-use anyhow::{anyhow, bail};
 use log::error;
 use std::{fmt::Write, iter, sync::Arc};
 use teloxide::{
     Bot,
     dispatching::dialogue::GetChatId,
     payloads::{SendMessageSetters, SendPhotoSetters},
-    requests::Requester,
+    requests::{Request, Requester},
     types::{
-        CallbackQuery, Chat, ChatId, ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind,
-        InlineKeyboardMarkup, InputFile, Message, ParseMode, User, UserId,
+        CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message,
+        ParseMode, UserId,
     },
 };
 
@@ -57,16 +59,14 @@ async fn unit_info(
                 .enumerate()
                 .filter(|(i, _)| !drop_completeness[*i])
                 .map(|(i, (id, _))| {
-                    [InlineKeyboardButton::new(
+                    [InlineKeyboardButton::callback(
                         format!("Я оставил фидбек для {}", i + 1),
-                        InlineKeyboardButtonKind::CallbackData(format!(
-                            "{UNIT_FEEDBACK_CALLBACK_PREFIX}{id}"
-                        )),
+                        format!("{UNIT_FEEDBACK_CALLBACK_PREFIX}{id}"),
                     )]
                 })
-                .chain(iter::once([InlineKeyboardButton::new(
+                .chain(iter::once([InlineKeyboardButton::callback(
                     "История дропов",
-                    InlineKeyboardButtonKind::CallbackData(DROPS_HISTORY_CALLBACK.to_string()),
+                    DROPS_HISTORY_CALLBACK,
                 )]))
                 .chain(iter::once([menu_button()])),
         );
@@ -87,9 +87,9 @@ async fn unit_info(
                 > Каждый <b>OknoUnit</b> получает <b>уведомления о новых дропах</b> сообщества.\
                 ")
             .parse_mode(ParseMode::Html)
-            .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
+            .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::callback(
                 "Стать OknoUnit",
-                InlineKeyboardButtonKind::CallbackData(UNIT_JOIN_CALLBACK.to_string()),
+                UNIT_JOIN_CALLBACK,
             )]]))
             .await?;
     }
@@ -97,47 +97,36 @@ async fn unit_info(
     Ok(())
 }
 
-pub async fn unit_info_command(
+pub async fn on_unit_info_command(
     bot: Bot,
     db: Arc<OknoId>,
     config: Arc<Config>,
     message: Message,
 ) -> anyhow::Result<()> {
-    let Some(User { id: user_id, .. }) = message.from else {
-        bail!("failed to get user id")
-    };
+    let user = message.from.ok_or(UtilError::FailedGetUser)?;
 
-    unit_info(&bot, &db, &config, user_id, message.chat.id).await
+    unit_info(&bot, &db, &config, user.id, message.chat.id).await
 }
 
-pub async fn unit_info_callback(
+pub async fn on_unit_info_callback(
     bot: Bot,
     db: Arc<OknoId>,
     config: Arc<Config>,
     callback: CallbackQuery,
 ) -> anyhow::Result<()> {
-    let chat_id = callback
-        .chat_id()
-        .ok_or_else(|| anyhow!("Failed to get callback chat id"))?;
+    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
 
     unit_info(&bot, &db, &config, callback.from.id, chat_id).await?;
     bot.answer_callback_query(callback.id).await?;
     Ok(())
 }
 
-pub async fn unit_join_callback(
+pub async fn on_unit_join_callback(
     bot: Bot,
     db: Arc<OknoId>,
     callback: CallbackQuery,
 ) -> anyhow::Result<()> {
-    let Message {
-        chat: Chat { id: chat_id, .. },
-        ..
-    } = callback
-        .regular_message()
-        .ok_or_else(|| anyhow!("failed get callback chat id"))?;
-    let chat_id = *chat_id;
-
+    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
     if db.give_role(callback.from.id, Role::OknoUnit).await? {
         bot.send_message(chat_id, "Вы стали OknoUnit!")
             .reply_markup(InlineKeyboardMarkup::new([[
@@ -150,34 +139,23 @@ pub async fn unit_join_callback(
     Ok(())
 }
 
-pub async fn unit_accept_report_callback(
+pub async fn on_unit_accept_report_callback(
     bot: Bot,
     db: Arc<OknoId>,
     callback: CallbackQuery,
 ) -> anyhow::Result<()> {
-    let Message {
-        chat: Chat { id: chat_id, .. },
-        ..
-    } = callback
-        .regular_message()
-        .ok_or_else(|| anyhow!("failed get callback chat id"))?;
-    let chat_id = *chat_id;
+    bot.answer_callback_query(callback.id.clone()).await?;
+    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
 
-    if !db.check_user_privileges(callback.from.id).await? {
-        bot.send_message(chat_id, "У вас недостаточно прав!")
-            .await?;
-        bot.answer_callback_query(callback.id).await?;
-        return Ok(());
-    }
+    check_user_privileges(&bot, &db, callback.from.id, chat_id).await?;
 
-    let callback_data = callback
-        .data
-        .ok_or_else(|| anyhow!("failed get callback data"))?;
+    let callback_data = callback.data.ok_or(UtilError::NoCallbackData)?;
     let (unit_id, drop_id) = callback_data[UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX.len()..]
         .split_once('-')
-        .ok_or_else(|| anyhow!("failed parse callback data"))?;
+        .ok_or(UtilError::FailedParseCallbackData)?;
 
-    let (unit_id, drop_id) = (UserId(unit_id.parse()?), drop_id.parse()?);
+    let unit_id = UserId(unit_id.parse()?);
+    let drop_id = drop_id.parse()?;
 
     if db.mark_drop_completed(drop_id, unit_id).await? {
         bot.send_message(
@@ -194,8 +172,6 @@ pub async fn unit_accept_report_callback(
         bot.send_message(chat_id, "Дроп уже был выполнен данным пользователем.")
             .await?;
     }
-
-    bot.answer_callback_query(callback.id).await?;
     Ok(())
 }
 
@@ -209,9 +185,7 @@ pub async fn on_unit_report_message(
 ) -> anyhow::Result<()> {
     session.exit().await?;
 
-    let Some(user) = message.from else {
-        bail!("failed get user")
-    };
+    let user = message.from.ok_or(UtilError::FailedGetUser)?;
 
     let drop_link = db.get_drop(drop_id).await?;
 
@@ -219,19 +193,16 @@ pub async fn on_unit_report_message(
         .await?;
     bot.send_message(config.support_chat, format!("Дроп: {drop_link}"))
         .reply_markup(InlineKeyboardMarkup::new([
-            [InlineKeyboardButton::new(
+            [InlineKeyboardButton::callback(
                 "Описание профиля",
-                InlineKeyboardButtonKind::CallbackData(format!(
-                    "{PROFILE_CALLBACK_PREFIX}{}",
-                    user.id
-                )),
+                format!("{PROFILE_CALLBACK_PREFIX}{}", user.id),
             )],
-            [InlineKeyboardButton::new(
-                "Подтвердеть",
-                InlineKeyboardButtonKind::CallbackData(format!(
-                    "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{}",
-                    user.id, drop_id
-                )),
+            [InlineKeyboardButton::callback(
+                "Подтвердить",
+                format!(
+                    "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}",
+                    user.id
+                ),
             )],
         ]))
         .await?;
@@ -239,22 +210,9 @@ pub async fn on_unit_report_message(
         message.chat.id,
         "Заявка отправлена! Админы проверят вашу заявку и начислят вам репутацию",
     )
-    .reply_markup(InlineKeyboardMarkup::new([[
-        InlineKeyboardButton::callback("В меню", MENU_CALLBACK),
-    ]]))
+    .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
     .await?;
 
-    Ok(())
-}
-
-pub async fn on_unit_report_cancel(
-    bot: Bot,
-    query: CallbackQuery,
-    session: Session,
-) -> anyhow::Result<()> {
-    session.exit().await?;
-    bot.send_message(session.chat_id(), "Отменено.").await?;
-    bot.answer_callback_query(query.id).await?;
     Ok(())
 }
 
@@ -282,84 +240,56 @@ async fn unit_report(
         .await?;
 
     bot.send_message(user_id, "киньте скрин вашего комментария/отзыва")
-        .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
-            "Отмена",
-            InlineKeyboardButtonKind::CallbackData(CANCEL_CALLBACK.to_string()),
-        )]]))
+        .reply_markup(InlineKeyboardMarkup::new([[
+            InlineKeyboardButton::callback("Отмена", CANCEL_CALLBACK),
+        ]]))
         .await?;
 
     Ok(())
 }
 
-pub async fn unit_report_callback(
+pub async fn on_unit_report_callback(
     bot: Bot,
     db: Arc<OknoId>,
     session: Session,
     callback: CallbackQuery,
 ) -> anyhow::Result<()> {
-    let message = callback
-        .regular_message()
-        .ok_or_else(|| anyhow!("callback message not found"))?;
+    bot.answer_callback_query(callback.id.clone()).await?;
+    let chat = get_callback_chat(&callback)?;
 
-    if !matches!(message.chat.kind, ChatKind::Private(..)) {
-        bot.send_message(
-            message.chat.id,
-            "Действие может быть выполнено только в личных сообщениях.",
-        )
-        .await?;
+    check_private(&bot, chat).await?;
 
-        bot.answer_callback_query(callback.id).await?;
-        return Ok(());
-    }
-
-    let callback_data = callback
-        .data
-        .ok_or_else(|| anyhow!("failed to get callback data"))?;
+    let callback_data = callback.data.ok_or(UtilError::NoCallbackData)?;
     let drop_id = callback_data[UNIT_FEEDBACK_CALLBACK_PREFIX.len()..].parse()?;
 
     unit_report(&bot, &db, &session, drop_id, callback.from.id).await?;
-
-    bot.answer_callback_query(callback.id).await?;
     Ok(())
 }
 
-pub async fn unit_report_command(
+pub async fn on_unit_report_command(
     bot: Bot,
     db: Arc<OknoId>,
     session: Session,
     message: Message,
 ) -> anyhow::Result<()> {
-    if !matches!(message.chat.kind, ChatKind::Private(..)) {
-        bot.send_message(
-            message.chat.id,
-            "Команда может быть использована только в личных сообщениях.",
-        )
-        .await?;
-        return Ok(());
-    }
+    check_private(&bot, &message.chat).await?;
 
     let Ok(drop_id) = get_args(&message).parse() else {
         invalid_usage_message(&bot, message.chat.id).await?;
         return Ok(());
     };
 
-    let User { id: user_id, .. } = message.from.ok_or_else(|| anyhow!("failed get user id"))?;
+    let user = message.from.ok_or(UtilError::FailedGetUser)?;
 
-    unit_report(&bot, &db, &session, drop_id, user_id).await?;
+    unit_report(&bot, &db, &session, drop_id, user.id).await?;
 
     Ok(())
 }
 
-pub async fn drop_command(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow::Result<()> {
-    let User { id: user_id, .. } = message
-        .from
-        .as_ref()
-        .ok_or_else(|| anyhow!("failed get user id"))?;
-    if !db.is_super_admin(*user_id) {
-        bot.send_message(message.chat.id, "У вас недостаточно прав.")
-            .await?;
-        return Ok(());
-    }
+pub async fn on_drop_command(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow::Result<()> {
+    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
+
+    check_user_super_admin(&bot, &db, user.id, message.chat.id).await?;
 
     let link = get_args(&message);
     if link.is_empty() {
@@ -369,16 +299,16 @@ pub async fn drop_command(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow
 
     let drop_id = db.add_drop(link).await?;
     let text = format!("Новый дроп сообщества!\n{link}");
-    let markup = InlineKeyboardMarkup::new([[InlineKeyboardButton::new(
+    let markup = InlineKeyboardMarkup::new([[InlineKeyboardButton::callback(
         "Я оставил фидбек",
-        InlineKeyboardButtonKind::CallbackData(format!("{UNIT_FEEDBACK_CALLBACK_PREFIX}{drop_id}")),
+        format!("{UNIT_FEEDBACK_CALLBACK_PREFIX}{drop_id}"),
     )]]);
 
+    let mut request = bot.send_message(UserId(0), text).reply_markup(markup);
+
     for unit in db.get_users_by_role(Role::OknoUnit).await? {
-        let res = bot
-            .send_message(unit, text.clone())
-            .reply_markup(markup.clone())
-            .await;
+        request.chat_id = unit.into();
+        let res = request.send_ref().await;
 
         if let Err(err) = res {
             error!("Failed to notify user {unit} about drop {drop_id} due: {err}");
@@ -394,19 +324,13 @@ pub async fn drop_command(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow
     Ok(())
 }
 
-pub async fn drops_history_callback(
+pub async fn on_drops_history_callback(
     bot: Bot,
     db: Arc<OknoId>,
     config: Arc<Config>,
     callback: CallbackQuery,
 ) -> anyhow::Result<()> {
-    let Message {
-        chat: Chat { id: chat_id, .. },
-        ..
-    } = callback
-        .regular_message()
-        .ok_or_else(|| anyhow!("failed to get callback chat id"))?;
-    let chat_id = *chat_id;
+    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
 
     let drops = db.get_latest_drops(3).await?;
 
