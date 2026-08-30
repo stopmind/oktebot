@@ -316,9 +316,11 @@ async fn top(
 ) -> anyhow::Result<()> {
     const PAGE_SIZE: u32 = 20;
     let top_data = db.get_top(page * PAGE_SIZE, PAGE_SIZE).await?;
+    let users_count = db.users_count().await?;
+    let pages_count = users_count.div_ceil(PAGE_SIZE);
 
     let mut text = format!(
-        "<b>Таблица репутации OknoMembers:</b> (страница {})\n",
+        "<b>Таблица репутации OknoMembers:</b> ({users_count} пользователей, страница {}/{pages_count})\n",
         page + 1
     );
     for (i, (_, rep, username)) in top_data.into_iter().enumerate() {
@@ -339,7 +341,6 @@ async fn top(
         }
     }
 
-    let next_page_exists = db.users_count().await? > PAGE_SIZE * (page + 1);
     let markup = InlineKeyboardMarkup::new(
         [
             (page > 0).then(|| {
@@ -348,7 +349,7 @@ async fn top(
                     format!("{TOP_CALLBACK_PREFIX}{}", page - 1),
                 )]
             }),
-            next_page_exists.then(|| {
+            (page + 1 < pages_count).then(|| {
                 [InlineKeyboardButton::callback(
                     "Следующая страница >",
                     format!("{TOP_CALLBACK_PREFIX}{}", page + 1),

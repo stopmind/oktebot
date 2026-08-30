@@ -21,11 +21,11 @@ use std::{fmt::Write, iter, sync::Arc};
 use teloxide::{
     Bot,
     dispatching::dialogue::GetChatId,
-    payloads::{SendMessageSetters, SendPhotoSetters},
+    payloads::{EditMessageReplyMarkupSetters, SendMessageSetters, SendPhotoSetters},
     requests::{Request, Requester},
     types::{
-        CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message,
-        ParseMode, UserId,
+        CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile,
+        MaybeInaccessibleMessage, Message, ParseMode, UserId,
     },
 };
 
@@ -145,22 +145,32 @@ pub async fn on_unit_accept_report_callback(
     callback: CallbackQuery,
 ) -> anyhow::Result<()> {
     bot.answer_callback_query(callback.id.clone()).await?;
-    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
+    let message = callback
+        .message
+        .as_ref()
+        .and_then(MaybeInaccessibleMessage::regular_message)
+        .ok_or(UtilError::FailedGetChat)?;
 
-    check_user_privileges(&bot, &db, callback.from.id, chat_id).await?;
+    check_user_privileges(&bot, &db, callback.from.id, message.chat.id).await?;
 
     let callback_data = callback.data.ok_or(UtilError::NoCallbackData)?;
-    let (unit_id, drop_id) = callback_data[UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX.len()..]
-        .split_once('-')
-        .ok_or(UtilError::FailedParseCallbackData)?;
+    let [unit_id, drop_id, rep_count] = callback_data[UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX.len()..]
+        .split('-')
+        .collect::<Vec<&str>>()
+        .try_into()
+        .map_err(|_| UtilError::FailedParseCallbackData)?;
 
     let unit_id = UserId(unit_id.parse()?);
     let drop_id = drop_id.parse()?;
+    let rep_count = rep_count.parse()?;
+
+    let username = db.get_username(unit_id).ok_or(UtilError::FailedGetUser)?;
 
     if db.mark_drop_completed(drop_id, unit_id).await? {
+        let new_rep = db.add_reputation(unit_id, rep_count).await?;
         bot.send_message(
-            chat_id,
-            "Дроп был отмечен как выполненный для данного пользователя.",
+            message.chat.id,
+            format!("Дроп был отмечен как выполненный для @{username}.\nОбновленная репутация: {new_rep}"),
         )
         .await?;
         bot.send_message(
@@ -168,9 +178,21 @@ pub async fn on_unit_accept_report_callback(
             format!("Ваша заявка по дропу {drop_id} была принята."),
         )
         .await?;
-    } else {
-        bot.send_message(chat_id, "Дроп уже был выполнен данным пользователем.")
+
+        bot.edit_message_reply_markup(message.chat.id, message.id)
+            .reply_markup(InlineKeyboardMarkup::new([[
+                InlineKeyboardButton::callback(
+                    "Описание профиля",
+                    format!("{PROFILE_CALLBACK_PREFIX}{}", unit_id),
+                ),
+            ]]))
             .await?;
+    } else {
+        bot.send_message(
+            message.chat.id,
+            "Дроп уже был выполнен данным пользователем.",
+        )
+        .await?;
     }
     Ok(())
 }
@@ -198,14 +220,29 @@ pub async fn on_unit_report_message(
                 format!("{PROFILE_CALLBACK_PREFIX}{}", user.id),
             )],
             [InlineKeyboardButton::callback(
-                "Подтвердить",
+                "Подтвердить +1",
                 format!(
-                    "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}",
+                    "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-1",
+                    user.id
+                ),
+            )],
+            [InlineKeyboardButton::callback(
+                "Подтвердить +2",
+                format!(
+                    "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-2",
+                    user.id
+                ),
+            )],
+            [InlineKeyboardButton::callback(
+                "Подтвердить +3",
+                format!(
+                    "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-3",
                     user.id
                 ),
             )],
         ]))
         .await?;
+
     bot.send_message(
         message.chat.id,
         "Заявка отправлена! Админы проверят вашу заявку и начислят вам репутацию",
