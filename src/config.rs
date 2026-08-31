@@ -3,7 +3,6 @@ use std::{
     collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 use teloxide::types::{ChatId, FileId, UserId};
 use thiserror::Error;
@@ -28,8 +27,6 @@ pub struct Banners {
 pub struct Config {
     pub token: String,
     pub support_chat: ChatId,
-    pub support_categories: Vec<Arc<String>>,
-    pub support_categories_layout: Vec<Vec<usize>>,
     pub banners: Banners,
     #[serde(default)]
     pub super_admins: BTreeSet<UserId>,

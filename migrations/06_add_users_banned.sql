@@ -1,0 +1,2 @@
+ALTER TABLE users
+    ADD banned INTEGER NOT NULL DEFAULT (0);

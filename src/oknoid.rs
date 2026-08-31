@@ -4,7 +4,7 @@ use crate::{
 };
 use futures::{TryStreamExt, stream::StreamExt};
 use log::info;
-use sqlx::{Error, SqlitePool, migrate::Migrator, sqlite::SqliteConnectOptions};
+use sqlx::{Decode, Error, FromRow, SqlitePool, migrate::Migrator, sqlite::SqliteConnectOptions};
 use std::{
     collections::{BTreeSet, HashMap},
     fmt::{Display, Formatter},
@@ -80,8 +80,16 @@ impl Role {
 pub struct UserInfo {
     #[allow(dead_code)]
     pub roles: BTreeSet<Role>,
+    pub is_banned: bool,
     pub reputation: i64,
     pub bio: Option<String>,
+}
+
+#[derive(FromRow)]
+pub struct DropInfo {
+    pub id: DropId,
+    pub link: String,
+    pub description: Option<String>,
 }
 
 struct Usernames {
@@ -230,8 +238,8 @@ impl OknoId {
     }
 
     pub async fn get_user_info(&self, id: UserId) -> IdResult<UserInfo> {
-        let (reputation, bio): (_, Option<String>) =
-            sqlx::query_as("SELECT reputation, bio FROM users WHERE id = ?")
+        let (reputation, bio, is_banned): (_, Option<String>, bool) =
+            sqlx::query_as("SELECT reputation, bio, banned FROM users WHERE id = ?")
                 .bind(id.0 as i64)
                 .fetch_one(&self.pool)
                 .await
@@ -241,6 +249,7 @@ impl OknoId {
             roles: self.get_roles(id).await?,
             reputation,
             bio,
+            is_banned,
         })
     }
 
@@ -346,28 +355,27 @@ impl OknoId {
             .try_collect()
             .await
     }
-    pub async fn get_latest_drops(&self, limit: u32) -> IdResult<Vec<(DropId, String)>> {
-        sqlx::query_as("SELECT id, link FROM drops ORDER BY id DESC LIMIT ?")
+    pub async fn get_latest_drops(&self, limit: u32) -> IdResult<Vec<DropInfo>> {
+        sqlx::query_as("SELECT id, link, description FROM drops ORDER BY id DESC LIMIT ?")
             .bind(limit)
-            .fetch(&self.pool)
-            .try_collect()
+            .fetch_all(&self.pool)
             .await
             .map_err(IdError::from)
     }
-    pub async fn add_drop(&self, link: &str) -> IdResult<DropId> {
-        sqlx::query_as("INSERT INTO drops (link) VALUES (?) RETURNING id")
+    pub async fn add_drop(&self, link: &str, description: Option<&str>) -> IdResult<DropId> {
+        sqlx::query_as("INSERT INTO drops (link, description) VALUES (?, ?) RETURNING id")
             .bind(link)
+            .bind(description)
             .fetch_one(&self.pool)
             .await
             .map(|(id,)| id)
             .map_err(IdError::from)
     }
-    pub async fn get_drop(&self, id: DropId) -> IdResult<String> {
-        sqlx::query_as("SELECT link FROM drops WHERE id = ?")
+    pub async fn get_drop(&self, id: DropId) -> IdResult<DropInfo> {
+        sqlx::query_as("SELECT id, link, description FROM drops WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
             .await
-            .map(|(id,)| id)
             .map_err(IdError::from)
     }
 
@@ -416,5 +424,24 @@ impl OknoId {
             .unwrap()
             .id_to_username
             .contains_key(&user)
+    }
+
+    pub async fn is_user_banned(&self, id: UserId) -> IdResult<bool> {
+        let (is_banned,) = sqlx::query_as("SELECT banned FROM users WHERE id = ?")
+            .bind(id.0 as i64)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| IdError::map_user_not_found(e, id))?;
+
+        Ok(is_banned)
+    }
+
+    pub async fn set_user_banned(&self, id: UserId, banned: bool) -> IdResult<()> {
+        sqlx::query("UPDATE users SET banned = ? WHERE id = ?")
+            .bind(banned)
+            .bind(id.0 as i64)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 }

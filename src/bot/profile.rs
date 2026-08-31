@@ -8,8 +8,8 @@ use crate::{
         },
         session::{Session, SessionState},
         utils::{
-            UtilError, check_private, check_user_privileges, get_callback_chat, get_id_username,
-            menu_button, resolve_mention,
+            UtilError, check_private, check_user_privileges, check_user_super_admin,
+            get_callback_chat, get_id_username, menu_button, resolve_mention, try_delete_origin,
         },
     },
     config::Config,
@@ -23,6 +23,7 @@ use teloxide::{
     dispatching::dialogue::GetChatId,
     payloads::{SendMessageSetters, SendPhotoSetters},
     prelude::{CallbackQuery, ChatId, Message, Requester, UserId},
+    sugar::bot::BotMessagesExt,
     types::{
         Chat, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, InputFile,
         ParseMode,
@@ -218,6 +219,7 @@ pub async fn on_me_callback(
         .ok_or(UtilError::FailedGetUser)?;
 
     send_profile(&bot, &db, chat_id, callback.from.id, username, true, true).await?;
+    try_delete_origin(&bot, &callback).await?;
     bot.answer_callback_query(callback.id).await?;
     Ok(())
 }
@@ -390,6 +392,64 @@ pub async fn on_top_callback(
 
     let page = data[TOP_CALLBACK_PREFIX.len()..].parse()?;
     top(&bot, &db, &config, chat_id, page).await?;
+    try_delete_origin(&bot, &callback).await?;
     bot.answer_callback_query(callback.id).await?;
     Ok(())
+}
+
+async fn change_banned_state_command(
+    bot: &Bot,
+    db: &OknoId,
+    message: &Message,
+    banned: bool,
+) -> anyhow::Result<()> {
+    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
+
+    check_user_super_admin(&bot, &db, user.id, message.chat.id).await?;
+
+    let args = get_args(&message);
+
+    if let Some(mention) = parser![Mention](args) {
+        let Some(target) = (match mention {
+            Mention::Username(username) => db.resolve_username(&username),
+            Mention::UserId(id) => Some(id),
+        }) else {
+            bot.send_message(message.chat.id, "Пользователь не найден")
+                .await?;
+            return Ok(());
+        };
+
+        let changed = db.is_user_banned(target).await? != banned;
+        if changed {
+            db.set_user_banned(target, banned).await?;
+        }
+
+        let response = if banned {
+            if changed {
+                "Пользователь забанен."
+            } else {
+                "Пользователь уже был забанен."
+            }
+        } else {
+            if changed {
+                "Пользователь более не забанен."
+            } else {
+                "Пользователь не был забанен."
+            }
+        };
+
+        bot.send_message(message.chat.id, response).await?;
+    } else {
+        invalid_usage_message(&bot, message.chat.id).await?;
+    }
+
+    Ok(())
+}
+
+pub async fn on_ban_command(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+    change_banned_state_command(&bot, &db, &message, true).await
+}
+
+pub async fn on_unban_command(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
+    change_banned_state_command(&bot, &db, &message, false).await
 }

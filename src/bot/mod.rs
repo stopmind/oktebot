@@ -2,7 +2,7 @@ use crate::{
     bot::{
         scheme::{HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK, UNIT_INFO_CALLBACK},
         session::Session,
-        utils::{UtilError, check_private, get_callback_chat, menu_button},
+        utils::{UtilError, check_private, get_callback_chat, menu_button, try_delete_origin},
     },
     config::Config,
     oknoid::OknoId,
@@ -42,9 +42,15 @@ pub async fn on_cancel_callback(
     session: Session,
 ) -> anyhow::Result<()> {
     session.exit().await?;
-    bot.send_message(session.chat_id(), "Отменено.")
-        .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
-        .await?;
+    if let Some(message) = query.regular_message() {
+        bot.edit_message_text(message.chat.id, message.id, "Отменено.")
+            .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
+            .await?;
+    } else {
+        bot.send_message(session.chat_id(), "Отменено.")
+            .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
+            .await?;
+    }
     bot.answer_callback_query(query.id).await?;
     Ok(())
 }
@@ -90,6 +96,8 @@ pub async fn send_help_message(
             /admin_add <code>&lt;пользователь&gt;</code> - добавить админа.\n\
             /admin_del <code>&lt;пользователь&gt;</code> - убрать админа.\n\
             /drop <code>&lt;ссылка&gt;</code> - создать новый дроп.\n\
+            /ban <code>&lt;пользователь&gt;</code> - забанить пользователя.\n\
+            /unban <code>&lt;пользователь&gt;</code> - разбанить пользователя.\n\
         ",
         );
     }
@@ -180,6 +188,7 @@ pub async fn on_main_menu_callback(
 ) -> anyhow::Result<()> {
     let chat = get_callback_chat(&callback)?;
     main_menu(&bot, &config, chat).await?;
+    try_delete_origin(&bot, &callback).await?;
     bot.answer_callback_query(callback.id).await?;
     Ok(())
 }

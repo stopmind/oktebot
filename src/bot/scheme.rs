@@ -8,9 +8,10 @@ use crate::bot::{
     on_cancel_callback, on_help_callback, on_help_command, on_main_menu_callback,
     on_main_menu_command,
     profile::{
-        on_add_admin_command, on_bio_callback, on_bio_command, on_bio_message, on_change_rep,
-        on_del_admin, on_info_command, on_me_callback, on_me_command, on_profile_callback,
-        on_start, on_top_callback, on_top_command, usernames_inspect,
+        on_add_admin_command, on_ban_command, on_bio_callback, on_bio_command, on_bio_message,
+        on_change_rep, on_del_admin, on_info_command, on_me_callback, on_me_command,
+        on_profile_callback, on_start, on_top_callback, on_top_command, on_unban_command,
+        usernames_inspect,
     },
     session::SessionState,
     support::*,
@@ -59,7 +60,9 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         .branch(case![Command::Unit].endpoint(on_unit_info_command))
                         .branch(case![Command::Feedback].endpoint(on_unit_report_command))
                         .branch(case![Command::Drop].endpoint(on_drop_command))
-                        .branch(case![Command::Menu].endpoint(on_main_menu_command)),
+                        .branch(case![Command::Menu].endpoint(on_main_menu_command))
+                        .branch(case![Command::Ban].endpoint(on_ban_command))
+                        .branch(case![Command::Unban].endpoint(on_unban_command)),
                 )
                 .branch(
                     case![SessionState::WaitSupportMessage { category }]

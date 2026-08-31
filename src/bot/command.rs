@@ -17,4 +17,6 @@ pub enum Command {
     Feedback,
     Drop,
     Menu,
+    Ban,
+    Unban,
 }

@@ -5,12 +5,14 @@ use crate::{
         scheme::{
             CANCEL_CALLBACK, DROPS_HISTORY_CALLBACK, MENU_CALLBACK, PROFILE_CALLBACK_PREFIX,
             UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, UNIT_FEEDBACK_CALLBACK_PREFIX,
-            UNIT_JOIN_CALLBACK,
+            UNIT_INFO_CALLBACK, UNIT_JOIN_CALLBACK,
         },
         session::{Session, SessionState},
+        support,
+        support::SupportCategory,
         utils::{
-            UtilError, check_private, check_user_privileges, check_user_super_admin,
-            get_callback_chat, menu_button,
+            USER_BANNED, UtilError, check_banned, check_private, check_user_privileges,
+            check_user_super_admin, get_callback_chat, menu_button, try_delete_origin,
         },
     },
     config::Config,
@@ -35,21 +37,31 @@ async fn unit_info(
     config: &Config,
     user_id: UserId,
     chat_id: ChatId,
+    from_menu: bool,
 ) -> anyhow::Result<()> {
     if db.check_role(user_id, Role::OknoUnit).await? {
         let drops = db.get_latest_drops(3).await?;
 
         let mut drop_completeness = Vec::with_capacity(drops.len());
-        for (id, _) in &drops {
-            drop_completeness.push(db.check_drop_completed(*id, user_id).await?);
+        for drop in &drops {
+            drop_completeness.push(db.check_drop_completed(drop.id, user_id).await?);
         }
 
         let mut text = String::new();
-        for (i, (_, link)) in drops.iter().enumerate() {
-            if drop_completeness[i] {
-                writeln!(&mut text, "{}. {} (выполнен)", i + 1, link)?;
-            } else {
-                writeln!(&mut text, "{}. {}", i + 1, link)?;
+        for (i, drop) in drops.iter().enumerate() {
+            writeln!(
+                &mut text,
+                "{}. {}{}",
+                i + 1,
+                drop.link,
+                if drop_completeness[i] {
+                    " (выполнен)"
+                } else {
+                    ""
+                }
+            )?;
+            if let Some(description) = &drop.description {
+                writeln!(&mut text, "> {}", description)?;
             }
         }
 
@@ -58,12 +70,15 @@ async fn unit_info(
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| !drop_completeness[*i])
-                .map(|(i, (id, _))| {
+                .map(|(i, drop)| {
                     [InlineKeyboardButton::callback(
                         format!("Я оставил фидбек для {}", i + 1),
-                        format!("{UNIT_FEEDBACK_CALLBACK_PREFIX}{id}"),
+                        format!("{UNIT_FEEDBACK_CALLBACK_PREFIX}{}", drop.id),
                     )]
                 })
+                .chain(iter::once([support::choice_button(
+                    SupportCategory::SuggestDrop,
+                )]))
                 .chain(iter::once([InlineKeyboardButton::callback(
                     "История дропов",
                     DROPS_HISTORY_CALLBACK,
@@ -90,7 +105,7 @@ async fn unit_info(
             .reply_markup(InlineKeyboardMarkup::new([[InlineKeyboardButton::callback(
                 "Стать OknoUnit",
                 UNIT_JOIN_CALLBACK,
-            )]]))
+            )]].into_iter().chain(from_menu.then(|| [menu_button()]))))
             .await?;
     }
 
@@ -105,7 +120,7 @@ pub async fn on_unit_info_command(
 ) -> anyhow::Result<()> {
     let user = message.from.ok_or(UtilError::FailedGetUser)?;
 
-    unit_info(&bot, &db, &config, user.id, message.chat.id).await
+    unit_info(&bot, &db, &config, user.id, message.chat.id, false).await
 }
 
 pub async fn on_unit_info_callback(
@@ -116,7 +131,8 @@ pub async fn on_unit_info_callback(
 ) -> anyhow::Result<()> {
     let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
 
-    unit_info(&bot, &db, &config, callback.from.id, chat_id).await?;
+    unit_info(&bot, &db, &config, callback.from.id, chat_id, true).await?;
+    try_delete_origin(&bot, &callback).await?;
     bot.answer_callback_query(callback.id).await?;
     Ok(())
 }
@@ -209,39 +225,51 @@ pub async fn on_unit_report_message(
 
     let user = message.from.ok_or(UtilError::FailedGetUser)?;
 
-    let drop_link = db.get_drop(drop_id).await?;
+    let drop = db.get_drop(drop_id).await?;
 
     bot.forward_message(config.support_chat, message.chat.id, message.id)
         .await?;
-    bot.send_message(config.support_chat, format!("Дроп: {drop_link}"))
-        .reply_markup(InlineKeyboardMarkup::new([
-            [InlineKeyboardButton::callback(
-                "Описание профиля",
-                format!("{PROFILE_CALLBACK_PREFIX}{}", user.id),
-            )],
-            [InlineKeyboardButton::callback(
-                "Подтвердить +1",
-                format!(
-                    "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-1",
-                    user.id
-                ),
-            )],
-            [InlineKeyboardButton::callback(
-                "Подтвердить +2",
-                format!(
-                    "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-2",
-                    user.id
-                ),
-            )],
-            [InlineKeyboardButton::callback(
-                "Подтвердить +3",
-                format!(
-                    "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-3",
-                    user.id
-                ),
-            )],
-        ]))
-        .await?;
+    bot.send_message(
+        config.support_chat,
+        format!(
+            "Дроп: {}{}{}",
+            drop.link,
+            if drop.description.is_some() {
+                "\n> "
+            } else {
+                ""
+            },
+            drop.description.as_deref().unwrap_or("")
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new([
+        [InlineKeyboardButton::callback(
+            "Описание профиля",
+            format!("{PROFILE_CALLBACK_PREFIX}{}", user.id),
+        )],
+        [InlineKeyboardButton::callback(
+            "Подтвердить +1",
+            format!(
+                "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-1",
+                user.id
+            ),
+        )],
+        [InlineKeyboardButton::callback(
+            "Подтвердить +2",
+            format!(
+                "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-2",
+                user.id
+            ),
+        )],
+        [InlineKeyboardButton::callback(
+            "Подтвердить +3",
+            format!(
+                "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-3",
+                user.id
+            ),
+        )],
+    ]))
+    .await?;
 
     bot.send_message(
         message.chat.id,
@@ -260,6 +288,8 @@ async fn unit_report(
     drop_id: DropId,
     user_id: UserId,
 ) -> anyhow::Result<()> {
+    check_banned(bot, db, user_id, user_id).await?;
+
     if !db.check_drop_exists(drop_id).await? {
         bot.send_message(user_id, "Дропа с таким id не существует!")
             .await?;
@@ -328,14 +358,20 @@ pub async fn on_drop_command(bot: Bot, db: Arc<OknoId>, message: Message) -> any
 
     check_user_super_admin(&bot, &db, user.id, message.chat.id).await?;
 
-    let link = get_args(&message);
-    if link.is_empty() {
-        bot.send_message(message.chat.id, "Укажите ссылку").await?;
+    let mut args = get_args(&message).split(' ');
+    let Some(link) = args.next() else {
+        invalid_usage_message(&bot, message.chat.id).await?;
         return Ok(());
-    }
+    };
 
-    let drop_id = db.add_drop(link).await?;
-    let text = format!("Новый дроп сообщества!\n{link}");
+    let description = args.next();
+
+    let drop_id = db.add_drop(link, description).await?;
+    let text = format!(
+        "Новый дроп сообщества!\n{link}{}{}",
+        if description.is_some() { "\n> " } else { "" },
+        description.unwrap_or("")
+    );
     let markup = InlineKeyboardMarkup::new([[InlineKeyboardButton::callback(
         "Я оставил фидбек",
         format!("{UNIT_FEEDBACK_CALLBACK_PREFIX}{drop_id}"),
@@ -372,29 +408,38 @@ pub async fn on_drops_history_callback(
     let drops = db.get_latest_drops(3).await?;
 
     let mut drop_completeness = Vec::with_capacity(drops.len());
-    for (id, _) in &drops {
-        drop_completeness.push(db.check_drop_completed(*id, callback.from.id).await?);
+    for drop in &drops {
+        drop_completeness.push(db.check_drop_completed(drop.id, callback.from.id).await?);
     }
 
     let mut text = "Используйте /feedback &lt;id&gt; для подачи заявки:\n".to_string();
-    for (i, (id, link)) in drops.iter().enumerate() {
-        if drop_completeness[i] {
-            writeln!(
-                &mut text,
-                "ID:{} <a href=\"{}\">ссылка</a> (выполнено)",
-                id, link
-            )?;
-        } else {
-            writeln!(&mut text, "ID:{} <a href=\"{}\">ссылка</a>", id, link)?;
+    for (i, drop) in drops.iter().enumerate() {
+        writeln!(
+            &mut text,
+            "ID:{} <a href=\"{}\">ссылка</a>{}",
+            drop.id,
+            drop.link,
+            if drop_completeness[i] {
+                "(выполнено)"
+            } else {
+                ""
+            }
+        )?;
+        if let Some(description) = &drop.description {
+            writeln!(&mut text, "> {description}",)?;
         }
     }
 
     bot.send_photo(chat_id, InputFile::file_id(config.banners.unit.clone()))
         .caption(text)
         .parse_mode(ParseMode::Html)
-        .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
+        .reply_markup(InlineKeyboardMarkup::new([[
+            InlineKeyboardButton::callback("Назад", UNIT_INFO_CALLBACK.to_owned()),
+            menu_button(),
+        ]]))
         .await?;
 
+    try_delete_origin(&bot, &callback).await?;
     bot.answer_callback_query(callback.id).await?;
     Ok(())
 }

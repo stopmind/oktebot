@@ -5,9 +5,11 @@ use crate::{
 use teloxide::{
     Bot,
     requests::Requester,
-    types::{CallbackQuery, Chat, ChatId, ChatKind, InlineKeyboardButton, User, UserId},
+    types::{CallbackQuery, Chat, ChatId, ChatKind, InlineKeyboardButton, Recipient, User, UserId},
 };
 use thiserror::Error;
+
+pub const USER_BANNED: &str = "Вы забанены";
 
 pub fn menu_button() -> InlineKeyboardButton {
     InlineKeyboardButton::callback("В меню", MENU_CALLBACK)
@@ -135,5 +137,27 @@ pub async fn resolve_mention(
                 Err(UtilError::UsageError)
             }
         }
+    }
+}
+
+pub async fn try_delete_origin(bot: &Bot, callback: &CallbackQuery) -> UtilResult<()> {
+    if let Some(message) = callback.regular_message() {
+        bot.delete_message(message.chat.id, message.id).await?;
+    }
+
+    Ok(())
+}
+
+pub async fn check_banned(
+    bot: &Bot,
+    db: &OknoId,
+    recepient: impl Into<Recipient>,
+    user_id: UserId,
+) -> UtilResult<()> {
+    if db.is_user_banned(user_id).await? {
+        bot.send_message(recepient.into(), USER_BANNED).await?;
+        Err(UtilError::UsageError)
+    } else {
+        Ok(())
     }
 }
