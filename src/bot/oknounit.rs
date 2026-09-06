@@ -405,7 +405,7 @@ pub async fn on_drops_history_callback(
 ) -> anyhow::Result<()> {
     let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
 
-    let drops = db.get_latest_drops(3).await?;
+    let drops = db.get_latest_drops(20).await?;
 
     let mut drop_completeness = Vec::with_capacity(drops.len());
     for drop in &drops {
