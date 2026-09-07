@@ -95,7 +95,7 @@ pub async fn send_help_message(
             <b>Команды СУПЕРадминов:</b>\n\
             /admin_add <code>&lt;пользователь&gt;</code> - добавить админа.\n\
             /admin_del <code>&lt;пользователь&gt;</code> - убрать админа.\n\
-            /drop <code>&lt;ссылка&gt;</code> - создать новый дроп.\n\
+            /drop <code>&lt;ссылка&gt;</code> <code>&lt;описание(опционально)&gt;</code> - создать новый дроп.\n\
             /ban <code>&lt;пользователь&gt;</code> - забанить пользователя.\n\
             /unban <code>&lt;пользователь&gt;</code> - разбанить пользователя.\n\
         ",
