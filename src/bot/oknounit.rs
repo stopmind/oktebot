@@ -365,13 +365,17 @@ pub async fn on_drop_command(bot: Bot, db: Arc<OknoId>, message: Message) -> any
 
     check_user_super_admin(&bot, &db, user.id, message.chat.id).await?;
 
-    let mut args = get_args(&message).split(' ');
-    let Some(link) = args.next() else {
-        invalid_usage_message(&bot, message.chat.id).await?;
-        return Ok(());
+    let mut args = get_args(&message);
+    let (link, description) = if let Some((link, description)) = args.split_once(' ') {
+        (link, Some(description))
+    } else {
+        (args, None)
     };
 
-    let description = args.next();
+    if link.is_empty() {
+        invalid_usage_message(&bot, message.chat.id).await?;
+        return Ok(());
+    }
 
     let drop_id = db.add_drop(link, description).await?;
     let text = format!(
