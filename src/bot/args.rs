@@ -9,6 +9,7 @@ pub struct InvalidMentionError;
 #[derive(Clone)]
 pub enum Mention {
     Username(String),
+    Firstname(String),
     UserId(UserId),
 }
 
@@ -18,11 +19,10 @@ impl FromStr for Mention {
     fn from_str(val: &str) -> Result<Self, Self::Err> {
         if let Some(username) = val.strip_prefix("@") {
             Ok(Mention::Username(username.to_owned()))
+        } else if let Ok(id) = val.parse() {
+            Ok(Mention::UserId(UserId(id)))
         } else {
-            match val.parse() {
-                Ok(id) => Ok(Mention::UserId(UserId(id))),
-                Err(_) => Err(InvalidMentionError),
-            }
+            Ok(Mention::Firstname(val.to_owned()))
         }
     }
 }

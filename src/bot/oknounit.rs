@@ -187,13 +187,14 @@ pub async fn on_unit_accept_report_callback(
     let drop_id = drop_id.parse()?;
     let rep_count = rep_count.parse()?;
 
-    let username = db.get_username(unit_id).ok_or(UtilError::FailedGetUser)?;
+    let user_names = db.get_user_names(unit_id)
+        .ok_or(UtilError::FailedGetUser)?;
 
     if db.mark_drop_completed(drop_id, unit_id).await? {
         let new_rep = db.add_reputation(unit_id, rep_count).await?;
         bot.send_message(
             message.chat.id,
-            format!("Дроп был отмечен как выполненный для @{username}.\nОбновленная репутация: {new_rep}"),
+            format!("Дроп был отмечен как выполненный для {user_names}.\nОбновленная репутация: {new_rep}"),
         )
         .await?;
         bot.send_message(

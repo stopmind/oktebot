@@ -118,26 +118,23 @@ pub async fn resolve_mention(
     db: &OknoId,
     chat_id: ChatId,
     mention: &Mention,
-) -> UtilResult<UserId> {
-    const USER_NOT_FOUND_MSG: &str = "Пользователь не найден!";
-    match mention {
-        Mention::Username(username) => {
-            if let Some(user) = db.resolve_username(username) {
-                Ok(user)
-            } else {
-                bot.send_message(chat_id, USER_NOT_FOUND_MSG).await?;
-                Err(UtilError::UsageError)
-            }
-        }
-        Mention::UserId(id) => {
-            if db.check_user_exists(*id) {
-                Ok(*id)
-            } else {
-                bot.send_message(chat_id, USER_NOT_FOUND_MSG).await?;
-                Err(UtilError::UsageError)
-            }
-        }
+) -> UtilResult<Vec<UserId>> {
+    let results = match mention {
+        Mention::Username(username) =>
+            db.resolve_username(username).map(|id| vec![id]),
+        Mention::UserId(id) =>
+            db.check_user_exists(*id).then(|| vec![*id]),
+        Mention::Firstname(first_name) => {
+            let ids = db.get_ids_by_first_name(first_name);
+            ids.is_empty().then(|| ids)
+        },
+    };
+
+    if results.is_none() {
+        bot.send_message(chat_id, "Пользователь не найден!").await?;
     }
+
+    results.ok_or(UtilError::UsageError)
 }
 
 pub async fn try_delete_origin(bot: &Bot, callback: &CallbackQuery) -> UtilResult<()> {
@@ -151,11 +148,11 @@ pub async fn try_delete_origin(bot: &Bot, callback: &CallbackQuery) -> UtilResul
 pub async fn check_banned(
     bot: &Bot,
     db: &OknoId,
-    recepient: impl Into<Recipient>,
+    recipient: impl Into<Recipient>,
     user_id: UserId,
 ) -> UtilResult<()> {
     if db.is_user_banned(user_id).await? {
-        bot.send_message(recepient.into(), USER_BANNED).await?;
+        bot.send_message(recipient.into(), USER_BANNED).await?;
         Err(UtilError::UsageError)
     } else {
         Ok(())

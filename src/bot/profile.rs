@@ -23,7 +23,6 @@ use teloxide::{
     dispatching::dialogue::GetChatId,
     payloads::{SendMessageSetters, SendPhotoSetters},
     prelude::{CallbackQuery, ChatId, Message, Requester, UserId},
-    sugar::bot::BotMessagesExt,
     types::{
         Chat, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, InputFile,
         ParseMode,
