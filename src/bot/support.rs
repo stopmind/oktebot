@@ -146,9 +146,8 @@ pub async fn on_support_selected_callback(
         .parse()
         .map_err(|_| UtilError::FailedParseCallbackData)?;
 
-    let category = SupportCategory::from_usize(idx)
-        .ok_or_else(|| anyhow!("support category not found"))?
-        .clone();
+    let category =
+        SupportCategory::from_usize(idx).ok_or_else(|| anyhow!("support category not found"))?;
 
     session
         .update(SessionState::WaitSupportMessage { category })

@@ -1,19 +1,19 @@
 use crate::{
     bot::{
         args::{Mention, get_args},
-        invalid_usage_message, main_menu,
+        invalid_usage_message,
         scheme::{
             BIO_CALLBACK, CANCEL_CALLBACK, MENU_CALLBACK, PROFILE_CALLBACK_PREFIX,
             TOP_CALLBACK_PREFIX,
         },
         session::{Session, SessionState},
         utils::{
-            UtilError, check_private, check_user_privileges, check_user_super_admin,
-            get_callback_chat, get_id_username, menu_button, resolve_mention, try_delete_origin,
+            UtilError, UtilResult, check_private, check_user_privileges, check_user_super_admin,
+            get_callback_chat, get_exactly_one_user, get_id_names, menu_button, try_delete_origin,
         },
     },
     config::Config,
-    oknoid::{IdError, OknoId, Role, UserInfo},
+    oknoid::{OknoId, Role, UserInfo},
     parser,
 };
 use log::error;
@@ -23,38 +23,43 @@ use teloxide::{
     dispatching::dialogue::GetChatId,
     payloads::{SendMessageSetters, SendPhotoSetters},
     prelude::{CallbackQuery, ChatId, Message, Requester, UserId},
-    sugar::bot::BotMessagesExt,
     types::{
-        Chat, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, InputFile,
-        ParseMode,
+        Chat, ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup,
+        InputFile, ParseMode, User,
     },
 };
 
-pub async fn usernames_inspect(message: Message, db: Arc<OknoId>) {
-    if let Ok((id, username)) = get_id_username(message.from.as_ref())
-        && let Err(err) = db.update_username(id, username.to_owned()).await
-    {
-        error!("Error while updating username: {:?}", err);
+async fn check_registration_inner(db: &OknoId, user: Option<&User>) -> UtilResult<()> {
+    let (id, names) = get_id_names(user)?;
+
+    if db.check_user_exists(id) {
+        db.update_names(id, names.username.as_deref(), names.first_name.as_ref())
+            .await?;
+    } else {
+        db.register_user(
+            id,
+            UserInfo {
+                username: names.username.map(|r| r.into_owned()),
+                first_name: names.first_name.into_owned(),
+                roles: Default::default(),
+                is_banned: false,
+                reputation: 0,
+                bio: None,
+            },
+        )
+        .await?;
     }
+
+    Ok(())
 }
 
-pub async fn on_start(
-    bot: Bot,
-    config: Arc<Config>,
-    message: Message,
-    db: Arc<OknoId>,
-) -> anyhow::Result<()> {
-    let (id, username) = get_id_username(message.from.as_ref())?;
-
-    if let Err(error) = db
-        .register_user(id, username.to_owned(), UserInfo::default())
-        .await
-        && !matches!(error, IdError::UserExists(..))
-    {
-        error!("Error registering user: {:?}", error);
-    };
-
-    main_menu(&bot, &config, &message.chat).await
+pub async fn check_registration(db: Arc<OknoId>, message: Message) {
+    if !matches!(message.chat.kind, ChatKind::Private(..)) {
+        return;
+    }
+    if let Err(err) = check_registration_inner(db.as_ref(), message.from.as_ref()).await {
+        error!("Error checking registration: {}", err);
+    }
 }
 
 async fn bio(bot: &Bot, session: &Session, chat: &Chat) -> anyhow::Result<()> {
@@ -130,26 +135,22 @@ async fn send_profile(
     db: &OknoId,
     chat_id: ChatId,
     user_id: UserId,
-    username: &str,
     is_me: bool,
     menu_button: bool,
 ) -> anyhow::Result<()> {
     let info = db.get_user_info(user_id).await?;
 
-    let text = if let Some(bio) = info.bio.as_ref() {
-        format!(
-            "> Username: {username}\n\
-            > Bio: {bio}\n\
-            > Reputation: {} ⚡",
-            info.reputation,
-        )
+    let mut text = if let Some(username) = info.username.as_deref() {
+        format!("> Username: {username}\n")
     } else {
-        format!(
-            "> Username: {username}\n\
-            > Reputation: {} ⚡",
-            info.reputation,
-        )
+        format!("> First name: {}\n", info.first_name)
     };
+
+    if let Some(bio) = info.bio.as_ref() {
+        writeln!(text, "> Bio: {bio}")?;
+    }
+
+    writeln!(text, "> Reputation: {} ⚡", info.reputation)?;
 
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new([iter::chain(
@@ -172,26 +173,9 @@ async fn send_profile(
 pub async fn on_info_command(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
     let args = get_args(&message);
     if let Some(mention) = parser![Mention](args) {
-        let info = match mention {
-            Mention::Username(username) => (db.resolve_username(&username), Some(username)),
-            Mention::UserId(id) => (Some(id), db.get_username(id)),
-        };
+        let user_id = get_exactly_one_user(&bot, &db, message.chat.id, &mention).await?;
 
-        if let (Some(id), Some(username)) = info {
-            send_profile(
-                &bot,
-                &db,
-                message.chat.id,
-                id,
-                username.as_ref(),
-                false,
-                false,
-            )
-            .await?;
-        } else {
-            bot.send_message(message.chat.id, "Пользователь не найден")
-                .await?;
-        }
+        send_profile(&bot, &db, message.chat.id, user_id, false, false).await?;
     } else {
         invalid_usage_message(&bot, message.chat.id).await?;
     }
@@ -200,9 +184,9 @@ pub async fn on_info_command(bot: Bot, message: Message, db: Arc<OknoId>) -> any
 }
 
 pub async fn on_me_command(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
-    let (id, username) = get_id_username(message.from.as_ref())?;
+    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
 
-    send_profile(&bot, &db, message.chat.id, id, username, true, false).await
+    send_profile(&bot, &db, message.chat.id, user.id, true, false).await
 }
 
 pub async fn on_me_callback(
@@ -212,13 +196,7 @@ pub async fn on_me_callback(
 ) -> anyhow::Result<()> {
     let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
 
-    let username = callback
-        .from
-        .username
-        .as_deref()
-        .ok_or(UtilError::FailedGetUser)?;
-
-    send_profile(&bot, &db, chat_id, callback.from.id, username, true, true).await?;
+    send_profile(&bot, &db, chat_id, callback.from.id, true, true).await?;
     try_delete_origin(&bot, &callback).await?;
     bot.answer_callback_query(callback.id).await?;
     Ok(())
@@ -241,9 +219,7 @@ pub async fn on_profile_callback(
         .map_err(|_| UtilError::FailedParseCallbackData)
         .map(UserId)?;
 
-    let username = db.get_username(user_id).ok_or(UtilError::FailedGetUser)?;
-
-    send_profile(&bot, &db, chat_id, user_id, username.as_str(), false, false).await?;
+    send_profile(&bot, &db, chat_id, user_id, false, false).await?;
     bot.answer_callback_query(callback.id).await?;
 
     Ok(())
@@ -256,7 +232,7 @@ pub async fn on_add_admin_command(
 ) -> anyhow::Result<()> {
     let args = get_args(&message);
     if let Some(mention) = parser![Mention](args) {
-        let id = resolve_mention(&bot, &db, message.chat.id, &mention).await?;
+        let id = get_exactly_one_user(&bot, &db, message.chat.id, &mention).await?;
 
         if db.give_role(id, Role::Admin).await? {
             bot.send_message(message.chat.id, "Пользователь назначен админом.")
@@ -274,7 +250,7 @@ pub async fn on_add_admin_command(
 pub async fn on_del_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
     let args = get_args(&message);
     if let Some(mention) = parser![Mention](args) {
-        let id = resolve_mention(&bot, &db, message.chat.id, &mention).await?;
+        let id = get_exactly_one_user(&bot, &db, message.chat.id, &mention).await?;
 
         if db.take_role(id, Role::Admin).await? {
             bot.send_message(message.chat.id, "Пользователь более не является админом.")
@@ -297,7 +273,7 @@ pub async fn on_change_rep(bot: Bot, message: Message, db: Arc<OknoId>) -> anyho
 
     let args = get_args(&message);
     if let Some((mention, value)) = parser![Mention, i64](args) {
-        let target_id = resolve_mention(&bot, &db, message.chat.id, &mention).await?;
+        let target_id = get_exactly_one_user(&bot, &db, message.chat.id, &mention).await?;
         let new_rep = db.add_reputation(target_id, value).await?;
 
         bot.send_message(message.chat.id, format!("Обновленная репутация: {new_rep}"))
@@ -325,21 +301,21 @@ async fn top(
         "<b>Таблица репутации OknoMembers:</b> ({users_count} пользователей, страница {}/{pages_count})\n",
         page + 1
     );
-    for (i, (_, rep, username)) in top_data.into_iter().enumerate() {
+    for (i, (_, rep, names)) in top_data.into_iter().enumerate() {
         match (i, page) {
             (0, 0) => writeln!(
                 &mut text,
-                "&gt; <tg-emoji emoji-id=\"5388614717164005740\">🪷</tg-emoji> <b>{username}</b> - {rep} rep."
+                "&gt; <tg-emoji emoji-id=\"5388614717164005740\">🪷</tg-emoji> <b>{names}</b> - {rep} rep."
             )?,
             (1, 0) => writeln!(
                 &mut text,
-                "&gt; <tg-emoji emoji-id=\"5388967879439852799\">🌸</tg-emoji> <b>{username}</b> - {rep} rep."
+                "&gt; <tg-emoji emoji-id=\"5388967879439852799\">🌸</tg-emoji> <b>{names}</b> - {rep} rep."
             )?,
             (2, 0) => writeln!(
                 &mut text,
-                "&gt; <tg-emoji emoji-id=\"5388956849963837711\">🌸</tg-emoji> <b>{username}</b> - {rep} rep."
+                "&gt; <tg-emoji emoji-id=\"5388956849963837711\">🌸</tg-emoji> <b>{names}</b> - {rep} rep."
             )?,
-            _ => writeln!(&mut text, "&gt; <b>{username}</b> - {rep} rep.")?,
+            _ => writeln!(&mut text, "&gt; <b>{names}</b> - {rep} rep.")?,
         }
     }
 
@@ -405,19 +381,12 @@ async fn change_banned_state_command(
 ) -> anyhow::Result<()> {
     let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
 
-    check_user_super_admin(&bot, &db, user.id, message.chat.id).await?;
+    check_user_super_admin(bot, db, user.id, message.chat.id).await?;
 
-    let args = get_args(&message);
+    let args = get_args(message);
 
     if let Some(mention) = parser![Mention](args) {
-        let Some(target) = (match mention {
-            Mention::Username(username) => db.resolve_username(&username),
-            Mention::UserId(id) => Some(id),
-        }) else {
-            bot.send_message(message.chat.id, "Пользователь не найден")
-                .await?;
-            return Ok(());
-        };
+        let target = get_exactly_one_user(bot, db, message.chat.id, &mention).await?;
 
         let changed = db.is_user_banned(target).await? != banned;
         if changed {
@@ -440,7 +409,7 @@ async fn change_banned_state_command(
 
         bot.send_message(message.chat.id, response).await?;
     } else {
-        invalid_usage_message(&bot, message.chat.id).await?;
+        invalid_usage_message(bot, message.chat.id).await?;
     }
 
     Ok(())
