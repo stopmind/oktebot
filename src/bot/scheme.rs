@@ -8,10 +8,9 @@ use crate::bot::{
     on_cancel_callback, on_help_callback, on_help_command, on_main_menu_callback,
     on_main_menu_command,
     profile::{
-        on_add_admin_command, on_ban_command, on_bio_callback, on_bio_command, on_bio_message,
-        on_change_rep, on_del_admin, on_info_command, on_me_callback, on_me_command,
-        on_profile_callback, on_start, on_top_callback, on_top_command, on_unban_command,
-        usernames_inspect,
+        check_registration, on_add_admin_command, on_ban_command, on_bio_callback, on_bio_command,
+        on_bio_message, on_change_rep, on_del_admin, on_info_command, on_me_callback,
+        on_me_command, on_profile_callback, on_top_callback, on_top_command, on_unban_command,
     },
     session::SessionState,
     support::*,
@@ -44,10 +43,10 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
     dialogue::enter::<Update, InMemStorage<SessionState>, SessionState, _>()
         .branch(
             Update::filter_message()
-                .inspect_async(usernames_inspect)
+                .inspect_async(check_registration)
                 .branch(
                     filter_command::<Command, _>()
-                        .branch(case![Command::Start].endpoint(on_start))
+                        .branch(case![Command::Start].endpoint(on_main_menu_command))
                         .branch(case![Command::Help].endpoint(on_help_command))
                         .branch(case![Command::Support].endpoint(on_support_command))
                         .branch(case![Command::Bio].endpoint(on_bio_command))

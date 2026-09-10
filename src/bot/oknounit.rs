@@ -11,8 +11,8 @@ use crate::{
         support,
         support::SupportCategory,
         utils::{
-            USER_BANNED, UtilError, check_banned, check_private, check_user_privileges,
-            check_user_super_admin, get_callback_chat, menu_button, try_delete_origin,
+            UtilError, check_banned, check_private, check_user_privileges, check_user_super_admin,
+            get_callback_chat, menu_button, try_delete_origin,
         },
     },
     config::Config,
@@ -187,8 +187,7 @@ pub async fn on_unit_accept_report_callback(
     let drop_id = drop_id.parse()?;
     let rep_count = rep_count.parse()?;
 
-    let user_names = db.get_user_names(unit_id)
-        .ok_or(UtilError::FailedGetUser)?;
+    let user_names = db.get_user_names(unit_id).ok_or(UtilError::FailedGetUser)?;
 
     if db.mark_drop_completed(drop_id, unit_id).await? {
         let new_rep = db.add_reputation(unit_id, rep_count).await?;
@@ -232,7 +231,6 @@ pub async fn on_unit_report_message(
     session.exit().await?;
 
     let user = message.from.ok_or(UtilError::FailedGetUser)?;
-
     let drop = db.get_drop(drop_id).await?;
 
     bot.forward_message(config.support_chat, message.chat.id, message.id)

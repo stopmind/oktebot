@@ -1,7 +1,8 @@
 use crate::{
     bot::{args::Mention, scheme::MENU_CALLBACK},
-    oknoid::{IdError, OknoId},
+    oknoid::{IdError, Names, OknoId},
 };
+use std::{borrow::Cow, fmt::Write, ops::Not};
 use teloxide::{
     Bot,
     requests::Requester,
@@ -100,41 +101,75 @@ pub async fn check_user_super_admin(
     }
 }
 
-pub fn get_id_username(user: Option<&User>) -> UtilResult<(UserId, &str)> {
-    if let Some(User {
-        id,
-        username: Some(username),
-        ..
-    }) = user
-    {
-        Ok((*id, username.as_str()))
+pub fn get_id_names(user: Option<&User>) -> UtilResult<(UserId, Names<'_>)> {
+    if let Some(user) = user {
+        Ok((
+            user.id,
+            Names {
+                username: user.username.as_deref().map(Cow::Borrowed),
+                first_name: Cow::Borrowed(user.first_name.as_ref()),
+            },
+        ))
     } else {
         Err(UtilError::FailedGetUser)
     }
 }
 
-pub async fn resolve_mention(
+pub fn resolve_mention(db: &OknoId, mention: &Mention) -> UtilResult<Vec<UserId>> {
+    let results = match mention {
+        Mention::Username(username) => db.resolve_username(username).map(|id| vec![id]),
+        Mention::UserId(id) => db.check_user_exists(*id).then(|| vec![*id]),
+        Mention::Firstname(first_name) => {
+            let ids = db.get_ids_by_first_name(first_name);
+            ids.is_empty().not().then_some(ids)
+        }
+    };
+
+    results.ok_or(UtilError::UsageError)
+}
+
+pub async fn user_not_found(bot: &Bot, chat_id: ChatId) -> UtilResult<()> {
+    bot.send_message(chat_id, "Пользователь не найден!").await?;
+    Ok(())
+}
+
+pub async fn multiple_users_found(
+    bot: &Bot,
+    db: &OknoId,
+    chat_id: ChatId,
+    users: impl Iterator<Item = UserId>,
+) -> UtilResult<()> {
+    let mut message = "Найдено несколько пользователей, выберите одного и используйте команду повторно, указав id или username:\n".to_owned();
+    for user_id in users {
+        let Some(names) = db.get_user_names(user_id) else {
+            continue;
+        };
+        writeln!(message, "> {names} id: {user_id}").expect("writing to string cannot fail");
+    }
+
+    bot.send_message(chat_id, message).await?;
+    Ok(())
+}
+
+pub async fn get_exactly_one_user(
     bot: &Bot,
     db: &OknoId,
     chat_id: ChatId,
     mention: &Mention,
-) -> UtilResult<Vec<UserId>> {
-    let results = match mention {
-        Mention::Username(username) =>
-            db.resolve_username(username).map(|id| vec![id]),
-        Mention::UserId(id) =>
-            db.check_user_exists(*id).then(|| vec![*id]),
-        Mention::Firstname(first_name) => {
-            let ids = db.get_ids_by_first_name(first_name);
-            ids.is_empty().then(|| ids)
-        },
-    };
+) -> UtilResult<UserId> {
+    let mut targets = resolve_mention(db, mention)?;
 
-    if results.is_none() {
-        bot.send_message(chat_id, "Пользователь не найден!").await?;
+    if targets.len() > 1 {
+        multiple_users_found(bot, db, chat_id, targets.into_iter()).await?;
+        return Err(UtilError::FailedGetUser);
     }
 
-    results.ok_or(UtilError::UsageError)
+    let Some(target) = targets.pop() else {
+        user_not_found(bot, chat_id).await?;
+        return Err(UtilError::FailedGetUser);
+    };
+
+    Ok(target)
 }
 
 pub async fn try_delete_origin(bot: &Bot, callback: &CallbackQuery) -> UtilResult<()> {

@@ -5,9 +5,12 @@ use crate::{
 use futures::{TryStreamExt, stream::StreamExt};
 use log::info;
 use sqlx::{Error, FromRow, SqlitePool, migrate::Migrator, sqlite::SqliteConnectOptions};
-use std::{collections::{BTreeSet, HashMap}, fmt::{Display, Formatter}, sync::{Arc, Mutex}};
-use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    fmt::{Display, Formatter},
+    sync::{Arc, Mutex},
+};
 use teloxide::prelude::*;
 use thiserror::Error;
 
@@ -34,7 +37,7 @@ impl IdError {
     }
 }
 
-type IdResult<T> = Result<T, IdError>;
+pub type IdResult<T> = Result<T, IdError>;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Role {
@@ -101,7 +104,7 @@ struct UsersNames {
 
 pub struct Names<'s> {
     pub username: Option<Cow<'s, str>>,
-    pub last_name: Cow<'s, str>,
+    pub first_name: Cow<'s, str>,
 }
 
 impl<'s> Display for Names<'s> {
@@ -109,20 +112,14 @@ impl<'s> Display for Names<'s> {
         if let Some(username) = self.username.as_ref() {
             write!(f, "@{}", username)
         } else {
-            f.write_str(&self.last_name)
+            f.write_str(&self.first_name)
         }
     }
 }
 
 impl UsersNames {
-
     /// returns true if values changed
-    fn try_update(
-        &mut self,
-        user_id: UserId,
-        username: Option<&str>,
-        first_name: &str
-    ) -> bool {
+    fn try_update(&mut self, user_id: UserId, username: Option<&str>, first_name: &str) -> bool {
         if let Some((current_first_name, current_username)) = self.id_to_names.get_mut(&user_id) {
             let first_name_changed = current_first_name.as_ref() != first_name;
             let username_changed = current_username.as_deref() != username;
@@ -130,8 +127,9 @@ impl UsersNames {
             if first_name_changed {
                 let first_name: Arc<str> = Arc::from(first_name);
 
-                let ids = self.first_name_to_ids.get_mut(current_first_name)
-                    .expect("if this first name is current then it must be presented in first_name_to_id");
+                let ids = self.first_name_to_ids.get_mut(current_first_name).expect(
+                    "if this first name is current then it must be presented in first_name_to_id",
+                );
 
                 ids.remove(&user_id);
                 if ids.is_empty() {
@@ -139,8 +137,11 @@ impl UsersNames {
                 }
                 *current_first_name = first_name.clone();
 
-                self.first_name_to_ids.entry(first_name)
-                    .and_modify(|ids| { ids.insert(user_id); })
+                self.first_name_to_ids
+                    .entry(first_name)
+                    .and_modify(|ids| {
+                        ids.insert(user_id);
+                    })
                     .or_insert_with(|| BTreeSet::from_iter([user_id]));
             }
 
@@ -164,18 +165,17 @@ impl UsersNames {
         }
     }
 
-    fn add(
-        &mut self,
-        user_id: UserId,
-        username: Option<&str>,
-        first_name: &str
-    ) {
+    fn add(&mut self, user_id: UserId, username: Option<&str>, first_name: &str) {
         let username: Option<Arc<str>> = username.map(Arc::from);
         let first_name: Arc<str> = Arc::from(first_name);
 
-        self.id_to_names.insert(user_id, (first_name.clone(), username.clone()));
-        self.first_name_to_ids.entry(first_name)
-            .and_modify(|ids| { ids.insert(user_id); })
+        self.id_to_names
+            .insert(user_id, (first_name.clone(), username.clone()));
+        self.first_name_to_ids
+            .entry(first_name)
+            .and_modify(|ids| {
+                ids.insert(user_id);
+            })
             .or_insert_with(|| BTreeSet::from_iter([user_id]));
         if let Some(username) = username {
             self.username_to_id.insert(username, user_id);
@@ -187,12 +187,11 @@ impl UsersNames {
     }
 
     fn get_names(&self, user_id: UserId) -> Option<Names<'_>> {
-        self.id_to_names.get(&user_id)
-            .map(|(first_name, username)| {
-                Names {
-                    username: username.as_deref().map(Cow::Borrowed),
-                    last_name: first_name.as_ref().into(),
-                }
+        self.id_to_names
+            .get(&user_id)
+            .map(|(first_name, username)| Names {
+                username: username.as_deref().map(Cow::Borrowed),
+                first_name: first_name.as_ref().into(),
             })
     }
 
@@ -203,8 +202,7 @@ impl UsersNames {
     }
 
     fn get_id_by_username(&self, username: &str) -> Option<UserId> {
-        self.username_to_id.get(username)
-            .copied()
+        self.username_to_id.get(username).copied()
     }
 }
 
@@ -244,22 +242,36 @@ impl OknoId {
             id_to_username.insert(id, username);
         }
 
+        let users_names = Self::load_users_names(&pool).await?;
+
         info!("Id database loaded.");
 
         Ok(OknoId {
             pool,
             config,
-            users_names: Default::default(),
+            users_names: users_names.into(),
         })
+    }
+
+    async fn load_users_names(db: &SqlitePool) -> IdResult<UsersNames> {
+        let mut names = UsersNames::default();
+
+        let rows = sqlx::query_as::<_, (u64, Option<String>, String)>(
+            "SELECT id, username, firstname FROM users",
+        )
+        .fetch_all(db)
+        .await?;
+
+        for (id, username, firstname) in rows {
+            names.add(UserId(id), username.as_deref(), firstname.as_str());
+        }
+
+        Ok(names)
     }
 }
 
 impl OknoId {
-    pub async fn register_user(
-        &self,
-        id: UserId,
-        info: UserInfo,
-    ) -> IdResult<()> {
+    pub async fn register_user(&self, id: UserId, info: UserInfo) -> IdResult<()> {
         {
             let mut users = self.users_names.lock().unwrap();
             if users.contains_user(id) {
@@ -269,26 +281,33 @@ impl OknoId {
             users.add(id, info.username.as_deref(), &info.first_name);
         }
 
-        sqlx::query("INSERT INTO users (id, reputation, bio, username, first_name) VALUES (?, ?, ?, ?, ?)")
-            .bind(id.0 as i64)
-            .bind(info.reputation)
-            .bind(info.bio)
-            .bind(info.username)
-            .bind(info.first_name)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "INSERT INTO users (id, reputation, bio, username, firstname) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(id.0 as i64)
+        .bind(info.reputation)
+        .bind(info.bio)
+        .bind(info.username)
+        .bind(info.first_name)
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
 
-    pub async fn update_username(&self, id: UserId, username: Option<&str>, first_name: &str) -> IdResult<()> {
+    pub async fn update_names(
+        &self,
+        id: UserId,
+        username: Option<&str>,
+        first_name: &str,
+    ) -> IdResult<()> {
         let updated = {
             let mut users = self.users_names.lock().unwrap();
             users.try_update(id, username, first_name)
         };
 
         if updated {
-            sqlx::query("UPDATE users SET username = ?, first_name = ? WHERE id = ?")
+            sqlx::query("UPDATE users SET username = ?, firstname = ? WHERE id = ?")
                 .bind(id.0 as i64)
                 .bind(username)
                 .bind(first_name)
@@ -307,15 +326,12 @@ impl OknoId {
     }
 
     pub fn get_user_names(&self, id: UserId) -> Option<Names<'static>> {
-        let users = self.users_names
-            .lock()
-            .unwrap();
-        
-        users.get_names(id)
-            .map(|n| Names {
-                username: n.username.map(|s| s.into_owned().into()),
-                last_name: n.last_name.into_owned().into(),
-            })
+        let users = self.users_names.lock().unwrap();
+
+        users.get_names(id).map(|n| Names {
+            username: n.username.map(|s| s.into_owned().into()),
+            first_name: n.first_name.into_owned().into(),
+        })
     }
 
     pub async fn set_bio(&self, id: UserId, bio: Option<&str>) -> IdResult<()> {
@@ -334,12 +350,13 @@ impl OknoId {
     }
 
     pub async fn get_user_info(&self, id: UserId) -> IdResult<UserInfo> {
-        let (username, first_name, reputation, bio, is_banned) =
-            sqlx::query_as("SELECT username, first_name, reputation, bio, banned FROM users WHERE id = ?")
-                .bind(id.0 as i64)
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|e| IdError::map_user_not_found(e, id))?;
+        let (username, first_name, reputation, bio, is_banned) = sqlx::query_as(
+            "SELECT username, firstname, reputation, bio, banned FROM users WHERE id = ?",
+        )
+        .bind(id.0 as i64)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| IdError::map_user_not_found(e, id))?;
 
         Ok(UserInfo {
             username,
@@ -430,19 +447,22 @@ impl OknoId {
         Ok(self.is_super_admin(id) || self.check_role(id, Role::Admin).await?)
     }
 
-    pub async fn get_top(&self, offset: u32, limit: u32) -> IdResult<Vec<(UserId, i64, String)>> {
-        sqlx::query_as(
-            "SELECT id, reputation, username FROM users ORDER BY reputation DESC LIMIT ? OFFSET ?",
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch(&self.pool)
-        .map(|res| {
-            let (id, rep, username) = res?;
-            Ok((UserId(id), rep, username))
-        })
-        .try_collect()
-        .await
+    pub async fn get_top(
+        &self,
+        offset: u32,
+        limit: u32,
+    ) -> IdResult<Vec<(UserId, i64, Names<'static>)>> {
+        sqlx::query_as("SELECT id, reputation FROM users ORDER BY reputation DESC LIMIT ? OFFSET ?")
+            .bind(limit)
+            .bind(offset)
+            .fetch(&self.pool)
+            .map(|res| {
+                let (id, rep) = res?;
+                let id = UserId(id);
+                Ok((id, rep, self.get_user_names(id).ok_or(UserNotFound(id))?))
+            })
+            .try_collect()
+            .await
     }
 
     pub async fn get_users_by_role(&self, role: Role) -> IdResult<Vec<UserId>> {
@@ -517,10 +537,7 @@ impl OknoId {
     }
 
     pub fn check_user_exists(&self, user: UserId) -> bool {
-        self.users_names
-            .lock()
-            .unwrap()
-            .contains_user(user)
+        self.users_names.lock().unwrap().contains_user(user)
     }
 
     pub async fn is_user_banned(&self, id: UserId) -> IdResult<bool> {
@@ -543,9 +560,11 @@ impl OknoId {
     }
 
     pub fn get_ids_by_first_name(&self, first_name: &str) -> Vec<UserId> {
-        self.users_names.lock().unwrap()
+        self.users_names
+            .lock()
+            .unwrap()
             .get_ids_by_first_name(first_name)
             .map(Vec::from_iter)
-            .unwrap_or(Vec::new())
+            .unwrap_or_default()
     }
 }

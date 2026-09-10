@@ -1,3 +1,5 @@
+#![deny(deprecated)]
+
 mod bot;
 mod config;
 mod oknoid;
