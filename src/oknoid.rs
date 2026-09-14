@@ -49,9 +49,9 @@ pub enum Role {
 impl Display for Role {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Role::Admin => "админ",
-            Role::SuperAdmin => "СУПЕРадмин",
-            Role::OknoUnit => "OKNO UNIT",
+            Role::Admin => "Admin",
+            Role::SuperAdmin => "SuperAdmin",
+            Role::OknoUnit => "OknoUnit",
         })
     }
 }

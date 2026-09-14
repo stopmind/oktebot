@@ -152,6 +152,10 @@ async fn send_profile(
 
     writeln!(text, "> Reputation: {} ⚡", info.reputation)?;
 
+    for role in info.roles {
+        writeln!(text, "> {role}")?;
+    }
+
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new([iter::chain(
             is_me.then(|| {

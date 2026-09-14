@@ -364,7 +364,7 @@ pub async fn on_drop_command(bot: Bot, db: Arc<OknoId>, message: Message) -> any
 
     check_user_super_admin(&bot, &db, user.id, message.chat.id).await?;
 
-    let mut args = get_args(&message);
+    let args = get_args(&message);
     let (link, description) = if let Some((link, description)) = args.split_once(' ') {
         (link, Some(description))
     } else {
