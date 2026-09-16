@@ -31,7 +31,8 @@ pub const SUPPORT_SELECTED_CALLBACK_PREFIX: &str = "support-selected";
 pub const UNIT_JOIN_CALLBACK: &str = "unit-join";
 pub const UNIT_FEEDBACK_CALLBACK_PREFIX: &str = "unit-feedback";
 pub const UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX: &str = "unit-accept";
-pub const DROPS_HISTORY_CALLBACK: &str = "drops-history";
+pub const DROPS_HISTORY_CALLBACK: &str = "drops-history0";
+pub const DROPS_HISTORY_CALLBACK_PREFIX: &str = "drops-history";
 pub const MENU_CALLBACK: &str = "menu";
 pub const SUPPORT_CALLBACK: &str = "support";
 pub const ME_CALLBACK: &str = "me";
@@ -96,7 +97,7 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         .endpoint(on_unit_join_callback),
                 )
                 .branch(
-                    filter(utils::callback_filter(DROPS_HISTORY_CALLBACK))
+                    filter(utils::callback_prefix_filter(DROPS_HISTORY_CALLBACK_PREFIX))
                         .endpoint(on_drops_history_callback),
                 )
                 .branch(

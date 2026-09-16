@@ -473,9 +473,10 @@ impl OknoId {
             .try_collect()
             .await
     }
-    pub async fn get_latest_drops(&self, limit: u32) -> IdResult<Vec<DropInfo>> {
-        sqlx::query_as("SELECT id, link, description FROM drops ORDER BY id DESC LIMIT ?")
+    pub async fn get_latest_drops(&self, offset: u32, limit: u32) -> IdResult<Vec<DropInfo>> {
+        sqlx::query_as("SELECT id, link, description FROM drops ORDER BY id DESC LIMIT ? OFFSET ?")
             .bind(limit)
+            .bind(offset)
             .fetch_all(&self.pool)
             .await
             .map_err(IdError::from)
@@ -566,5 +567,13 @@ impl OknoId {
             .get_ids_by_first_name(first_name)
             .map(Vec::from_iter)
             .unwrap_or_default()
+    }
+    
+    pub async fn get_drops_count(&self) -> IdResult<u32> {
+        sqlx::query_as("SELECT COUNT(*) FROM drops")
+            .fetch_one(&self.pool)
+            .await
+            .map(|(count,)| count)
+            .map_err(IdError::from)
     }
 }
