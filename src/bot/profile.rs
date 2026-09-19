@@ -343,7 +343,7 @@ async fn top(
         .flatten(),
     );
 
-    bot.send_photo(chat_id, InputFile::file_id(config.banners.top.clone()))
+    bot.send_photo(chat_id, InputFile::url(config.banners.top.clone()))
         .caption(text)
         .parse_mode(ParseMode::Html)
         .reply_markup(markup)

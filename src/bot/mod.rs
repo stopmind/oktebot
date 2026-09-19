@@ -151,7 +151,7 @@ pub async fn main_menu(bot: &Bot, config: &Config, chat: &Chat) -> anyhow::Resul
         \n\
         <i>С чем я могу вам помочь?</i>";
 
-    bot.send_photo(chat.id, InputFile::file_id(config.banners.main.clone()))
+    bot.send_photo(chat.id, InputFile::url(config.banners.main.clone()))
         .caption(text)
         .reply_markup(InlineKeyboardMarkup::new([
             vec![InlineKeyboardButton::callback(

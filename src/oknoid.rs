@@ -568,7 +568,7 @@ impl OknoId {
             .map(Vec::from_iter)
             .unwrap_or_default()
     }
-    
+
     pub async fn get_drops_count(&self) -> IdResult<u32> {
         sqlx::query_as("SELECT COUNT(*) FROM drops")
             .fetch_one(&self.pool)

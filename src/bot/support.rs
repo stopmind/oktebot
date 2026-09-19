@@ -86,7 +86,7 @@ async fn support(
         vec![menu_button()],
     ];
 
-    bot.send_photo(chat.id, InputFile::file_id(config.banners.support.clone()))
+    bot.send_photo(chat.id, InputFile::url(config.banners.support.clone()))
         .caption("\
         Здесь вы можете обратится напрямую к <b>администрации</b> бота и oknoweb.ru. <b>ВСЕ</b> обращения будут рассмотрены.\n\
         \n\

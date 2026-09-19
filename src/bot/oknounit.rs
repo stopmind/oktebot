@@ -3,9 +3,9 @@ use crate::{
         args::get_args,
         invalid_usage_message,
         scheme::{
-            CANCEL_CALLBACK, DROPS_HISTORY_CALLBACK, MENU_CALLBACK, PROFILE_CALLBACK_PREFIX,
-            UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, UNIT_FEEDBACK_CALLBACK_PREFIX,
-            UNIT_INFO_CALLBACK, UNIT_JOIN_CALLBACK,
+            CANCEL_CALLBACK, DROPS_HISTORY_CALLBACK, DROPS_HISTORY_CALLBACK_PREFIX, MENU_CALLBACK,
+            PROFILE_CALLBACK_PREFIX, UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX,
+            UNIT_FEEDBACK_CALLBACK_PREFIX, UNIT_INFO_CALLBACK, UNIT_JOIN_CALLBACK,
         },
         session::{Session, SessionState},
         support,
@@ -30,7 +30,6 @@ use teloxide::{
         MaybeInaccessibleMessage, Message, ParseMode, UserId,
     },
 };
-use crate::bot::scheme::{DROPS_HISTORY_CALLBACK_PREFIX, TOP_CALLBACK_PREFIX};
 
 async fn unit_info(
     bot: &Bot,
@@ -87,12 +86,12 @@ async fn unit_info(
                 .chain(iter::once([menu_button()])),
         );
 
-        bot.send_photo(chat_id, InputFile::file_id(config.banners.unit.clone()))
+        bot.send_photo(chat_id, InputFile::url(config.banners.unit.clone()))
             .caption(text)
             .reply_markup(markup)
             .await?;
     } else {
-        bot.send_photo(chat_id,  InputFile::file_id(config.banners.unit.clone()))
+        bot.send_photo(chat_id,  InputFile::url(config.banners.unit.clone()))
             .caption("\
                 <b>OknoUnit</b> - Это статус <b>боевой единицы</b> нашего сообщества. Задача каждого OknoUnit`а - <b>проявлять активность на дропах.</b>\n\
                 \n\
@@ -429,7 +428,10 @@ pub async fn on_drops_history_callback(
         drop_completeness.push(db.check_drop_completed(drop.id, callback.from.id).await?);
     }
 
-    let mut text = format!("Страница ({}/{pages_count}). Используйте /feedback &lt;id&gt; для подачи заявки:\n", page+1);
+    let mut text = format!(
+        "Страница ({}/{pages_count}). Используйте /feedback &lt;id&gt; для подачи заявки:\n",
+        page + 1
+    );
     for (i, drop) in drops.iter().enumerate() {
         writeln!(
             &mut text,
@@ -449,7 +451,10 @@ pub async fn on_drops_history_callback(
 
     let markup = InlineKeyboardMarkup::new(
         [
-            Some([InlineKeyboardButton::callback("Назад", UNIT_INFO_CALLBACK.to_owned())]),
+            Some([InlineKeyboardButton::callback(
+                "Назад",
+                UNIT_INFO_CALLBACK.to_owned(),
+            )]),
             (page > 0).then(|| {
                 [InlineKeyboardButton::callback(
                     "< Предыдущая страница",
@@ -464,11 +469,11 @@ pub async fn on_drops_history_callback(
             }),
             Some([menu_button()]),
         ]
-            .into_iter()
-            .flatten(),
+        .into_iter()
+        .flatten(),
     );
 
-    bot.send_photo(chat_id, InputFile::file_id(config.banners.unit.clone()))
+    bot.send_photo(chat_id, InputFile::url(config.banners.unit.clone()))
         .caption(text)
         .parse_mode(ParseMode::Html)
         .reply_markup(markup)
