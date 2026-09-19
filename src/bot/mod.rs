@@ -12,17 +12,27 @@ use teloxide::{
     RequestError,
     dispatching::dialogue::GetChatId,
     prelude::*,
-    types::{BotCommand, Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode},
+    types::{
+        BotCommand, Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Me, ParseMode,
+    },
 };
 
 mod args;
 mod command;
 mod oknounit;
 mod profile;
+mod router;
 pub mod scheme;
 pub mod session;
 pub mod support;
 pub mod utils;
+
+pub struct BotContext {
+    bot: Bot,
+    config: Config,
+    db: OknoId,
+    me: Me,
+}
 
 pub async fn invalid_usage_message(bot: &Bot, chat_id: ChatId) -> Result<(), RequestError> {
     bot.send_message(
