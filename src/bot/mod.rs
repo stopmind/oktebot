@@ -16,6 +16,7 @@ use teloxide::{
         BotCommand, Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Me, ParseMode,
     },
 };
+use crate::bot::router::CommandInfo;
 
 mod args;
 mod command;
@@ -28,10 +29,10 @@ pub mod support;
 pub mod utils;
 
 pub struct BotContext {
-    bot: Bot,
-    config: Config,
-    db: OknoId,
-    me: Me,
+    pub bot: Bot,
+    pub config: Arc<Config>,
+    pub db: OknoId,
+    pub me: Me,
 }
 
 pub async fn invalid_usage_message(bot: &Bot, chat_id: ChatId) -> Result<(), RequestError> {
@@ -81,7 +82,7 @@ pub async fn send_help_message(
         \n\
         <b>Команды:</b>\n\
         /help - эта справка.\n\
-        /main_menu - главное меню.\n\
+        /menu - главное меню.\n\
         /support - отправть сообщение в тех. поддержку, работает только в ЛС.\n\
         /me - показать свой профиль.\n\
         /info <code>&lt;пользователь&gt;</code> - запросить профиль пользователя.\n\
@@ -138,6 +139,15 @@ pub async fn on_help_command(bot: Bot, db: Arc<OknoId>, message: Message) -> any
     Ok(())
 }
 
+pub async fn on_help_command_new(
+    ctx: &BotContext,
+    info: &CommandInfo,
+    _: ()
+) -> anyhow::Result<()> {
+    send_help_message(&ctx.bot, info.chat.id, &ctx.db, info.from.id).await?;
+    Ok(())
+}
+
 pub async fn set_commands(bot: &Bot) -> anyhow::Result<()> {
     bot.set_my_commands([
         BotCommand::new("menu", "главное меню"),
@@ -189,6 +199,14 @@ pub async fn on_main_menu_command(
     message: Message,
 ) -> anyhow::Result<()> {
     main_menu(&bot, &config, &message.chat).await
+}
+
+pub async fn on_main_menu_command_new(
+    ctx: &BotContext,
+    info: &CommandInfo,
+    _: ()
+) -> anyhow::Result<()> {
+    main_menu(&ctx.bot, &ctx.config, &info.chat).await
 }
 
 pub async fn on_main_menu_callback(

@@ -1,27 +1,20 @@
-use crate::bot::{
-    command::Command,
-    oknounit::{
-        on_drop_command, on_drops_history_callback, on_unit_accept_report_callback,
-        on_unit_info_callback, on_unit_info_command, on_unit_join_callback,
-        on_unit_report_callback, on_unit_report_command, on_unit_report_message,
-    },
-    on_cancel_callback, on_help_callback, on_help_command, on_main_menu_callback,
-    on_main_menu_command,
-    profile::{
-        check_registration, on_add_admin_command, on_ban_command, on_bio_callback, on_bio_command,
-        on_bio_message, on_change_rep, on_del_admin, on_info_command, on_me_callback,
-        on_me_command, on_profile_callback, on_top_callback, on_top_command, on_unban_command,
-    },
-    session::SessionState,
-    support::*,
-    utils,
-};
+use crate::bot::{command::Command, oknounit::{
+    on_drop_command, on_drops_history_callback, on_unit_accept_report_callback,
+    on_unit_info_callback, on_unit_info_command, on_unit_join_callback,
+    on_unit_report_callback, on_unit_report_command, on_unit_report_message,
+}, on_cancel_callback, on_help_callback, on_help_command, on_help_command_new, on_main_menu_callback, on_main_menu_command, on_main_menu_command_new, profile::{
+    check_registration, on_add_admin_command, on_ban_command, on_bio_callback, on_bio_command,
+    on_bio_message, on_change_rep, on_del_admin, on_info_command, on_me_callback,
+    on_me_command, on_profile_callback, on_top_callback, on_top_command, on_unban_command,
+}, session::SessionState, support::*, utils, BotContext};
 use teloxide::{
     dispatching::{UpdateHandler, dialogue, dialogue::InMemStorage},
     dptree::{case, filter},
     filter_command,
     prelude::*,
 };
+use crate::bot::router::{CommandInfo, HandlerOptions, Router};
+use crate::w;
 
 pub const CANCEL_CALLBACK: &str = "cancel";
 pub const HELP_CALLBACK: &str = "help";
@@ -124,4 +117,32 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         .endpoint(on_top_callback),
                 ),
         )
+}
+
+pub fn scheme2() -> Router {
+    let mut router = Router::default();
+
+    router
+        .command(w!(on_main_menu_command_new), "menu", HandlerOptions::empty()
+            .only_private(true)
+        )
+        .command(w!(on_help_command_new), "help", HandlerOptions::empty())
+        .command(w!(on_support_command_new), "support", HandlerOptions::empty()
+            .only_private(true)
+        );
+        //.command(w!(on_bio_command), "", HandlerOptions::empty())
+        //.command(w!(on_info_command), "", HandlerOptions::empty())
+        //.command(w!(on_me_command), "", HandlerOptions::empty())
+        //.command(w!(on_add_admin_command), "", HandlerOptions::empty())
+        //.command(w!(on_del_admin), "", HandlerOptions::empty())
+        //.command(w!(on_change_rep), "", HandlerOptions::empty())
+        //.command(w!(on_top_command), "", HandlerOptions::empty())
+        //.command(w!(on_unit_info_command), "", HandlerOptions::empty())
+        //.command(w!(on_unit_report_command), "", HandlerOptions::empty())
+        //.command(w!(on_drop_command), "", HandlerOptions::empty())
+        //.command(w!(on_main_menu_command), "", HandlerOptions::empty())
+        //.command(w!(on_ban_command), "", HandlerOptions::empty())
+        //.command(w!(on_unban_command), "", HandlerOptions::empty());
+
+    router
 }

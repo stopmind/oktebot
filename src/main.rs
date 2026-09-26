@@ -1,5 +1,3 @@
-#![deny(deprecated)]
-
 mod bot;
 mod config;
 mod oknoid;
@@ -9,7 +7,11 @@ use anyhow::anyhow;
 use bot::{scheme::scheme, session::SessionState};
 use log::{LevelFilter, error, info};
 use std::{env, fs, sync::Arc};
-use teloxide::{dispatching::dialogue::InMemStorage, prelude::*};
+use futures::{poll, StreamExt};
+use teloxide::{dispatching::dialogue::InMemStorage, prelude::*, update_listeners};
+use teloxide::update_listeners::AsUpdateStream;
+use crate::bot::BotContext;
+use crate::bot::scheme::scheme2;
 
 async fn start() -> anyhow::Result<()> {
     info!("Starting bot...");
@@ -32,7 +34,7 @@ async fn start() -> anyhow::Result<()> {
 
     set_commands(&bot).await?;
 
-    Dispatcher::builder(bot, scheme())
+    /*Dispatcher::builder(bot, scheme())
         .dependencies(dptree::deps![
             InMemStorage::<SessionState>::new(),
             config,
@@ -41,8 +43,17 @@ async fn start() -> anyhow::Result<()> {
         .enable_ctrlc_handler()
         .build()
         .dispatch()
-        .await;
+        .await;*/
 
+    let me = bot.get_me().await?;
+
+    let router = Arc::new(scheme2());
+    router.handle_updates(Arc::new(BotContext {
+        bot,
+        config,
+        db,
+        me,
+    })).await;
     Ok(())
 }
 

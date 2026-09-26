@@ -20,6 +20,8 @@ use teloxide::{
     prelude::{Message, *},
     types::{Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode},
 };
+use crate::bot::BotContext;
+use crate::bot::router::CommandInfo;
 
 #[derive(Clone, Copy)]
 pub enum SupportCategory {
@@ -111,7 +113,21 @@ pub async fn on_support_command(
         &message.chat,
         message.from.ok_or(UtilError::FailedGetUser)?.id,
     )
-    .await
+        .await
+}
+
+pub async fn on_support_command_new(
+    ctx: &BotContext,
+    info: &CommandInfo,
+    _: ()
+) -> Result<()> {
+    support(
+        &ctx.bot,
+        &ctx.db,
+        &ctx.config,
+        &info.chat,
+        info.from.id,
+    ).await
 }
 
 pub async fn on_support_callback(
