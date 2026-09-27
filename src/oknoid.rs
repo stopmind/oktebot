@@ -2,9 +2,9 @@ use crate::{
     config::Config,
     oknoid::IdError::{UserExists, UserNotFound},
 };
-use futures::{TryStreamExt, stream::StreamExt};
+use futures::{stream::StreamExt, TryStreamExt};
 use log::info;
-use sqlx::{Error, FromRow, SqlitePool, migrate::Migrator, sqlite::SqliteConnectOptions};
+use sqlx::{migrate::Migrator, sqlite::SqliteConnectOptions, Error, FromRow, SqlitePool};
 use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet, HashMap},

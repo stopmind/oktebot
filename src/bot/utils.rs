@@ -4,9 +4,9 @@ use crate::{
 };
 use std::{borrow::Cow, fmt::Write, ops::Not};
 use teloxide::{
-    Bot,
     requests::Requester,
     types::{CallbackQuery, Chat, ChatId, ChatKind, InlineKeyboardButton, Recipient, User, UserId},
+    Bot,
 };
 use thiserror::Error;
 

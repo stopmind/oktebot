@@ -1,27 +1,22 @@
-use crate::{bot::BotContext, oknoid::OknoId};
+use crate::{
+    bot::{args::HandlerArgs, BotContext},
+    oknoid::OknoId,
+};
 use anyhow::bail;
-use futures::future::LocalBoxFuture;
 use futures::{future::BoxFuture, FutureExt, StreamExt};
-use std::collections::HashMap;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::time::Duration;
-use log::{error, info};
-use teloxide::types::{MediaKind, MessageId};
-use teloxide::{requests::Requester, types::{
-    CallbackQuery, Chat, ChatKind, MaybeInaccessibleMessage, Message, MessageCommon,
-    MessageKind, Update, UpdateKind, User, UserId,
-}, update_listeners, Bot, RequestError};
-use teloxide::payloads::GetUpdatesSetters;
-use teloxide::update_listeners::AsUpdateStream;
-
-pub trait HandlerArgs {
-    fn parse() -> Self;
-}
-
-impl HandlerArgs for () {
-    fn parse() -> Self {}
-}
+use log::error;
+use std::{collections::HashMap, sync::Arc, time::Duration};
+use teloxide::{
+    requests::Requester,
+    types::{
+        CallbackQuery, Chat, ChatKind, MaybeInaccessibleMessage, MediaKind, Message, MessageCommon,
+        MessageId, MessageKind, Update, UpdateKind, User, UserId,
+    },
+    update_listeners,
+    update_listeners::AsUpdateStream,
+    Bot,
+};
+use crate::bot::invalid_usage_message;
 
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub enum PrivilegeLevel {
@@ -31,6 +26,7 @@ pub enum PrivilegeLevel {
     SuperAdmin,
 }
 
+//TODO: add remove old message
 #[derive(Default, Copy, Clone)]
 pub struct HandlerOptions {
     pub only_private: bool,
@@ -92,10 +88,9 @@ impl HandlerOptions {
 struct CommandHandler {
     opts: HandlerOptions,
     func: Box<
-        dyn for<'fut> Fn(
-            &'fut BotContext,
-            &'fut CommandInfo,
-        ) -> BoxFuture<'fut, anyhow::Result<()>> + Send + Sync,
+        dyn for<'fut> Fn(&'fut BotContext, &'fut CommandInfo) -> BoxFuture<'fut, anyhow::Result<()>>
+            + Send
+            + Sync,
     >,
 }
 
@@ -109,12 +104,23 @@ pub struct CommandInfo {
 impl CommandHandler {
     fn new<Func, Args>(f: Func, opts: HandlerOptions) -> Self
     where
-        Func: for<'a> Fn(&'a BotContext, &'a CommandInfo, Args) -> BoxFuture<'a, anyhow::Result<()>> + Send + Sync + 'static,
+        Func: for<'a> Fn(&'a BotContext, &'a CommandInfo, Args) -> BoxFuture<'a, anyhow::Result<()>>
+            + Send
+            + Sync
+            + 'static,
         Args: HandlerArgs,
     {
         Self {
             opts,
-            func: Box::new(move |ctx, info| f(ctx, info, HandlerArgs::parse())),
+            func: Box::new(move |ctx, info| {
+                if let Some(args) = HandlerArgs::parse_from_command(info.text.as_str()) {
+                    f(ctx, info, args)
+                } else {
+                    invalid_usage_message(&ctx.bot, info.chat.id)
+                        .map(|r| r.map_err(anyhow::Error::from))
+                        .boxed()
+                }
+            }),
         }
     }
 }
@@ -123,9 +129,11 @@ struct CallbackHandler {
     opts: HandlerOptions,
     func: Box<
         dyn for<'fut> Fn(
-            &'fut BotContext,
-            &'fut CallbackInfo,
-        ) -> BoxFuture<'fut, anyhow::Result<()>> + Send + Sync,
+                &'fut BotContext,
+                &'fut CallbackInfo,
+            ) -> Option<BoxFuture<'fut, anyhow::Result<()>>>
+            + Send
+            + Sync,
     >,
 }
 
@@ -138,20 +146,27 @@ pub struct CallbackInfo {
 impl CallbackHandler {
     fn new<Func, Args>(f: Func, opts: HandlerOptions) -> Self
     where
-        Func: for<'a> Fn(&'a BotContext, &'a CallbackInfo, Args) -> BoxFuture<'a, anyhow::Result<()>> + Send + Sync + 'static,
+        Func: for<'a> Fn(&'a BotContext, &'a CallbackInfo, Args) -> BoxFuture<'a, anyhow::Result<()>>
+            + Send
+            + Sync
+            + 'static,
         Args: HandlerArgs,
     {
         Self {
             opts,
-            func: Box::new(move |ctx, info| f(ctx, info, Args::parse())),
+            func: Box::new(move |ctx, info| {
+                HandlerArgs::parse_from_callback(info.data.as_str()).map(|args| f(ctx, info, args))
+            }),
         }
     }
 }
+
 
 #[derive(Default)]
 pub struct Router {
     commands_actions: HashMap<String, CommandHandler>,
     callbacks_actions: HashMap<String, CallbackHandler>,
+    state_handler: Option<Box<dyn for<'a> Fn(&'a BotContext, &'a Message) -> Option<BoxFuture<'a, anyhow::Result<()>>> + Send + Sync>>
 }
 
 impl Router {
@@ -162,7 +177,10 @@ impl Router {
         opts: HandlerOptions,
     ) -> &mut Self
     where
-        Func: for<'a> Fn(&'a BotContext, &'a CallbackInfo, Args) -> BoxFuture<'a, anyhow::Result<()>> + Send + Sync + 'static,
+        Func: for<'a> Fn(&'a BotContext, &'a CallbackInfo, Args) -> BoxFuture<'a, anyhow::Result<()>>
+            + Send
+            + Sync
+            + 'static,
         Args: HandlerArgs,
     {
         let handler = CallbackHandler::new(func, opts);
@@ -179,13 +197,24 @@ impl Router {
         opts: HandlerOptions,
     ) -> &mut Self
     where
-        Func: for<'a> Fn(&'a BotContext, &'a CommandInfo, Args) -> BoxFuture<'a, anyhow::Result<()>> + Send + Sync + 'static,
+        Func: for<'a> Fn(&'a BotContext, &'a CommandInfo, Args) -> BoxFuture<'a, anyhow::Result<()>>
+            + Send
+            + Sync
+            + 'static,
         Args: HandlerArgs,
     {
         let handler = CommandHandler::new(func, opts);
         let command = command.into();
 
         self.commands_actions.insert(command, handler);
+        self
+    }
+
+    pub fn state(
+        &mut self,
+        f: impl for<'a> Fn(&'a BotContext, &'a Message) -> Option<BoxFuture<'a, anyhow::Result<()>>> + Send + Sync + 'static,
+    ) -> &mut Self {
+        self.state_handler = Some(Box::new(f));
         self
     }
 }
@@ -219,48 +248,44 @@ impl Router {
 
         let text = text.text;
 
-        let Some(command) = text.strip_prefix('/')
-        else {
-            return Ok(());
-        };
-
-        let mut command = match command.find(' ') {
-            None => command,
-            Some(pos) => &command[..pos],
-        };
-
-        let mut username_specified = false;
-        if let Some((command_name, username)) = command.split_once('@') {
-            command = command_name;
-            username_specified = true;
-            if !username.eq_ignore_ascii_case(ctx.me.username()) {
-                return Ok(());
-            }
-        }
-
-        let Some(handler) = self.commands_actions.get(command) else {
-            if username_specified || matches!(&chat.kind, ChatKind::Private(..)) {
-                ctx.bot.send_message(
-                    chat.id,
-                    "Неизвестная команда.",
-                ).await?;
-            }
-            return Ok(());
-        };
-
-        let allowed = handler
-            .opts
-            .check(&ctx.bot, &ctx.db, &chat, from.id)
-            .await?;
-
-        if allowed {
-            let info = CommandInfo {
-                message_id: id,
-                from,
-                chat,
-                text,
+        if let Some(command) = text.strip_prefix('/') {
+            let mut command = match command.find(' ') {
+                None => command,
+                Some(pos) => &command[..pos],
             };
-            (handler.func)(ctx, &info).await?;
+
+            let mut username_specified = false;
+            if let Some((command_name, username)) = command.split_once('@') {
+                command = command_name;
+                username_specified = true;
+                if !username.eq_ignore_ascii_case(ctx.me.username()) {
+                    return Ok(());
+                }
+            }
+
+            let Some(handler) = self.commands_actions.get(command) else {
+                if username_specified || matches!(&chat.kind, ChatKind::Private(..)) {
+                    ctx.bot
+                        .send_message(chat.id, "Неизвестная команда.")
+                        .await?;
+                }
+                return Ok(());
+            };
+
+            let allowed = handler
+                .opts
+                .check(&ctx.bot, &ctx.db, &chat, from.id)
+                .await?;
+
+            if allowed {
+                let info = CommandInfo {
+                    message_id: id,
+                    from,
+                    chat,
+                    text,
+                };
+                (handler.func)(ctx, &info).await?;
+            }
         }
 
         Ok(())
@@ -284,7 +309,7 @@ impl Router {
 
         ctx.bot.answer_callback_query(id).await?;
 
-        let callback_name = match data.find('-') {
+        let callback_name = match data.find(':') {
             None => data.as_str(),
             Some(pos) => &data[..pos],
         };
@@ -304,7 +329,9 @@ impl Router {
                 message,
                 from,
             };
-            (handler.func)(ctx, &info).await?;
+            if let Some(future) = (handler.func)(ctx, &info) {
+                future.await?;
+            }
         }
 
         Ok(())
@@ -314,7 +341,7 @@ impl Router {
 impl Router {
     pub async fn handle_updates(self: Arc<Self>, ctx: Arc<BotContext>) {
         const RETRY_TIME: Duration = Duration::from_secs(5);
-        
+
         let mut listener = update_listeners::polling_default(ctx.bot.clone()).await;
         let mut stream = Box::pin(listener.as_stream());
 
@@ -325,7 +352,7 @@ impl Router {
                         tokio::spawn({
                             let this = self.clone();
                             let ctx = ctx.clone();
-                            
+
                             async move {
                                 if let Err(err) = this.handle_update(&ctx, update).await {
                                     error!("Failed to handle update: {}", err);
@@ -334,7 +361,10 @@ impl Router {
                         });
                     }
                     Err(err) => {
-                        error!("failed retrieve error: {err}, retry in {}", RETRY_TIME.as_secs());
+                        error!(
+                            "failed retrieve error: {err}, retry in {}",
+                            RETRY_TIME.as_secs()
+                        );
                         tokio::time::sleep(RETRY_TIME).await;
                     }
                 }
@@ -345,5 +375,29 @@ impl Router {
 
 #[macro_export]
 macro_rules! w {
-    ($f:expr) => {#[inline] |c, i, a| ::futures::FutureExt::boxed(($f)(c, i, a))};
+    ($f:expr) => {
+        #[inline]
+        |c, i, a| ::futures::FutureExt::boxed(($f)(c, i, a))
+    };
+}
+
+#[macro_export]
+macro_rules! __state_arg {
+    ($user:expr, [user]) => {$user};
+    ($user:expr, $exp:expr) => {$exp};
+}
+
+#[macro_export]
+macro_rules! states {
+    {$($pattern:pat => $func:ident $(($($arg:tt),+))?),*} => {
+        |ctx, message| {
+            let __user = message.from.as_ref()?;
+            match ctx.sessions.get(__user.id) {
+                $($pattern => {::std::option::Option::Some(
+                    ::futures::FutureExt::boxed($func(ctx, message, ($($($crate::__state_arg!(__user, $arg),)+)?)))
+                )})*
+                _ => ::std::option::Option::None
+            }
+        }
+    };
 }

@@ -2,16 +2,15 @@ mod bot;
 mod config;
 mod oknoid;
 
-use crate::{bot::set_commands, config::Config, oknoid::OknoId};
+use crate::{
+    bot::{scheme::scheme2, session::Sessions, set_commands, BotContext},
+    config::Config,
+    oknoid::OknoId,
+};
 use anyhow::anyhow;
-use bot::{scheme::scheme, session::SessionState};
-use log::{LevelFilter, error, info};
+use log::{error, info, LevelFilter};
 use std::{env, fs, sync::Arc};
-use futures::{poll, StreamExt};
-use teloxide::{dispatching::dialogue::InMemStorage, prelude::*, update_listeners};
-use teloxide::update_listeners::AsUpdateStream;
-use crate::bot::BotContext;
-use crate::bot::scheme::scheme2;
+use teloxide::prelude::*;
 
 async fn start() -> anyhow::Result<()> {
     info!("Starting bot...");
@@ -37,12 +36,15 @@ async fn start() -> anyhow::Result<()> {
     let me = bot.get_me().await?;
 
     let router = Arc::new(scheme2());
-    router.handle_updates(Arc::new(BotContext {
-        bot,
-        config,
-        db,
-        me,
-    })).await;
+    router
+        .handle_updates(Arc::new(BotContext {
+            bot,
+            config,
+            db,
+            me,
+            sessions: Sessions::default(),
+        }))
+        .await;
     Ok(())
 }
 

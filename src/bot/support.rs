@@ -1,27 +1,25 @@
 use crate::{
     bot::{
+        router::{CallbackInfo, CommandInfo},
         scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX, SUPPORT_SELECTED_CALLBACK_PREFIX},
-        session::{Session, SessionState},
+        session::SessionState,
         utils::{
-            UtilError, check_banned, check_private, get_callback_chat, menu_button,
-            try_delete_origin,
+            check_banned, check_private, menu_button
         },
+        BotContext,
     },
     config::Config,
     oknoid::OknoId,
 };
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::{
-    fmt::{Display, Formatter},
-    sync::Arc,
+    fmt::{Display, Formatter}
 };
 use teloxide::{
-    dispatching::dialogue::GetChatId,
     prelude::{Message, *},
     types::{Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode},
 };
-use crate::bot::BotContext;
-use crate::bot::router::CommandInfo;
+use teloxide::types::User;
 
 #[derive(Clone, Copy)]
 pub enum SupportCategory {
@@ -100,75 +98,29 @@ async fn support(
     Ok(())
 }
 
-pub async fn on_support_command(
-    bot: Bot,
-    db: Arc<OknoId>,
-    config: Arc<Config>,
-    message: Message,
-) -> Result<()> {
-    support(
-        &bot,
-        &db,
-        &config,
-        &message.chat,
-        message.from.ok_or(UtilError::FailedGetUser)?.id,
-    )
-        .await
+pub async fn on_support_command(ctx: &BotContext, info: &CommandInfo, _: ()) -> Result<()> {
+    support(&ctx.bot, &ctx.db, &ctx.config, &info.chat, info.from.id).await
 }
 
-pub async fn on_support_command_new(
-    ctx: &BotContext,
-    info: &CommandInfo,
-    _: ()
-) -> Result<()> {
-    support(
-        &ctx.bot,
-        &ctx.db,
-        &ctx.config,
-        &info.chat,
-        info.from.id,
-    ).await
-}
-
-pub async fn on_support_callback(
-    bot: Bot,
-    db: Arc<OknoId>,
-    config: Arc<Config>,
-    callback: CallbackQuery,
-) -> Result<()> {
-    bot.answer_callback_query(callback.id.clone()).await?;
-    let chat = get_callback_chat(&callback)?;
-
-    check_banned(&bot, &db, chat.id, callback.from.id).await?;
-    support(&bot, &db, &config, chat, callback.from.id).await?;
-    try_delete_origin(&bot, &callback).await?;
+pub async fn on_support_callback(ctx: &BotContext, info: &CallbackInfo, _: ()) -> Result<()> {
+    let chat = info.message.chat();
+    support(&ctx.bot, &ctx.db, &ctx.config, chat, info.from.id).await?;
     Ok(())
 }
 
 pub async fn on_support_selected_callback(
-    bot: Bot,
-    callback: CallbackQuery,
-    session: Session,
-    db: Arc<OknoId>,
+    ctx: &BotContext,
+    info: &CallbackInfo,
+    (idx,): (usize,),
 ) -> Result<()> {
-    bot.answer_callback_query(callback.id.clone()).await?;
-    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
-
-    check_banned(&bot, &db, chat_id, callback.from.id).await?;
-
-    let callback_data = callback.data.as_ref().ok_or(UtilError::NoCallbackData)?;
-
-    let idx: usize = callback_data[SUPPORT_SELECTED_CALLBACK_PREFIX.len()..]
-        .parse()
-        .map_err(|_| UtilError::FailedParseCallbackData)?;
-
+    let chat = info.message.chat();
     let category =
         SupportCategory::from_usize(idx).ok_or_else(|| anyhow!("support category not found"))?;
 
-    session
-        .update(SessionState::WaitSupportMessage { category })
-        .await?;
-    bot.send_message(chat_id, "Отправьте сообщение для тех. поддержки.")
+    ctx.sessions
+        .set(info.from.id, SessionState::WaitSupportMessage { category });
+    ctx.bot
+        .send_message(chat.id, "Отправьте сообщение для тех. поддержки.")
         .reply_markup(InlineKeyboardMarkup::new([[
             InlineKeyboardButton::callback("Отмена", CANCEL_CALLBACK),
         ]]))
@@ -177,25 +129,22 @@ pub async fn on_support_selected_callback(
 }
 
 pub async fn on_support_message(
-    bot: Bot,
-    session: Session,
-    message: Message,
-    config: Arc<Config>,
-    category: SupportCategory,
+    ctx: &BotContext,
+    message: &Message,
+    (user, category): (&User, SupportCategory),
 ) -> Result<()> {
-    session.exit().await?;
-    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
+    ctx.sessions.set(user.id, SessionState::Empty);
 
     let callback = format!("{PROFILE_CALLBACK_PREFIX}{}", user.id);
 
-    bot.forward_message(config.support_chat, message.chat.id, message.id)
+    ctx.bot.forward_message(ctx.config.support_chat, message.chat.id, message.id)
         .await?;
-    bot.send_message(config.support_chat, format!("Категория: {category}"))
+    ctx.bot.send_message(ctx.config.support_chat, format!("Категория: {category}"))
         .reply_markup(InlineKeyboardMarkup::new([[
             InlineKeyboardButton::callback("Описание профиля", callback),
         ]]))
         .await?;
-    bot.send_message(message.chat.id, "Сообщение отправлено!")
+    ctx.bot.send_message(message.chat.id, "Сообщение отправлено!")
         .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
         .await?;
 

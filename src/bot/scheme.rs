@@ -1,20 +1,12 @@
-use crate::bot::router::{HandlerOptions, Router};
-use crate::bot::{command::Command, oknounit::{
-    on_drop_command, on_drops_history_callback, on_unit_accept_report_callback,
-    on_unit_info_callback, on_unit_info_command, on_unit_join_callback,
-    on_unit_report_callback, on_unit_report_command, on_unit_report_message,
-}, on_cancel_callback, on_help_callback, on_help_command, on_help_command_new, on_main_menu_callback, on_main_menu_command, on_main_menu_command_new, profile::{
-    check_registration, on_add_admin_command, on_ban_command, on_bio_callback, on_bio_command,
-    on_bio_message, on_change_rep, on_del_admin, on_info_command, on_me_callback,
-    on_me_command, on_profile_callback, on_top_callback, on_top_command, on_unban_command,
-}, session::SessionState, support::*, utils};
-use crate::w;
-use teloxide::{
-    dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler},
-    dptree::{case, filter},
-    filter_command,
-    prelude::*,
-};
+use crate::{bot::{
+    oknounit::*,
+    on_cancel_callback, on_help_callback, on_help_command, on_main_menu_callback,
+    on_main_menu_command,
+    profile::*,
+    router::{HandlerOptions, PrivilegeLevel, Router},
+    support::*,
+}, states, w};
+use crate::bot::session::SessionState;
 
 pub const CANCEL_CALLBACK: &str = "cancel";
 pub const HELP_CALLBACK: &str = "help";
@@ -22,7 +14,7 @@ pub const BIO_CALLBACK: &str = "bio";
 pub const PROFILE_CALLBACK_PREFIX: &str = "profile";
 pub const SUPPORT_SELECTED_CALLBACK_PREFIX: &str = "support-selected";
 pub const UNIT_JOIN_CALLBACK: &str = "unit-join";
-pub const UNIT_FEEDBACK_CALLBACK_PREFIX: &str = "unit-feedback";
+pub const UNIT_REPORT_CALLBACK_PREFIX: &str = "unit-feedback";
 pub const UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX: &str = "unit-accept";
 pub const DROPS_HISTORY_CALLBACK: &str = "drops-history";
 pub const MENU_CALLBACK: &str = "menu";
@@ -32,117 +24,57 @@ pub const UNIT_INFO_CALLBACK: &str = "unit-info";
 pub const TOP_CALLBACK_PREFIX: &str = "top";
 pub const TOP_CALLBACK: &str = "top0";
 
-pub fn scheme() -> UpdateHandler<anyhow::Error> {
-    dialogue::enter::<Update, InMemStorage<SessionState>, SessionState, _>()
-        .branch(
-            Update::filter_message()
-                .inspect_async(check_registration)
-                .branch(
-                    filter_command::<Command, _>()
-                        .branch(case![Command::Start].endpoint(on_main_menu_command))
-                        .branch(case![Command::Help].endpoint(on_help_command))
-                        .branch(case![Command::Support].endpoint(on_support_command))
-                        .branch(case![Command::Bio].endpoint(on_bio_command))
-                        .branch(case![Command::Info].endpoint(on_info_command))
-                        .branch(case![Command::Me].endpoint(on_me_command))
-                        .branch(case![Command::AdminAdd].endpoint(on_add_admin_command))
-                        .branch(case![Command::AdminDel].endpoint(on_del_admin))
-                        .branch(case![Command::Rep].endpoint(on_change_rep))
-                        .branch(case![Command::Top].endpoint(on_top_command))
-                        .branch(case![Command::Unit].endpoint(on_unit_info_command))
-                        .branch(case![Command::Feedback].endpoint(on_unit_report_command))
-                        .branch(case![Command::Drop].endpoint(on_drop_command))
-                        .branch(case![Command::Menu].endpoint(on_main_menu_command))
-                        .branch(case![Command::Ban].endpoint(on_ban_command))
-                        .branch(case![Command::Unban].endpoint(on_unban_command)),
-                )
-                .branch(
-                    case![SessionState::WaitSupportMessage { category }]
-                        .endpoint(on_support_message),
-                )
-                .branch(case![SessionState::WaitBioMessage].endpoint(on_bio_message))
-                .branch(
-                    case![SessionState::WaitUnitReport { drop_id }]
-                        .endpoint(on_unit_report_message),
-                ),
-        )
-        .branch(
-            Update::filter_callback_query()
-                .branch(
-                    filter(utils::callback_filter(CANCEL_CALLBACK)).endpoint(on_cancel_callback),
-                )
-                .branch(filter(utils::callback_filter(HELP_CALLBACK)).endpoint(on_help_callback))
-                .branch(filter(utils::callback_filter(BIO_CALLBACK)).endpoint(on_bio_callback))
-                .branch(
-                    filter(utils::callback_filter(MENU_CALLBACK)).endpoint(on_main_menu_callback),
-                )
-                .branch(
-                    filter(utils::callback_filter(UNIT_INFO_CALLBACK))
-                        .endpoint(on_unit_info_callback),
-                )
-                .branch(filter(utils::callback_filter(ME_CALLBACK)).endpoint(on_me_callback))
-                .branch(
-                    filter(utils::callback_filter(SUPPORT_CALLBACK)).endpoint(on_support_callback),
-                )
-                .branch(
-                    filter(utils::callback_filter(UNIT_JOIN_CALLBACK))
-                        .endpoint(on_unit_join_callback),
-                )
-                .branch(
-                    filter(utils::callback_filter(DROPS_HISTORY_CALLBACK))
-                        .endpoint(on_drops_history_callback),
-                )
-                .branch(
-                    filter(utils::callback_prefix_filter(PROFILE_CALLBACK_PREFIX))
-                        .endpoint(on_profile_callback),
-                )
-                .branch(
-                    filter(utils::callback_prefix_filter(
-                        SUPPORT_SELECTED_CALLBACK_PREFIX,
-                    ))
-                    .endpoint(on_support_selected_callback),
-                )
-                .branch(
-                    filter(utils::callback_prefix_filter(UNIT_FEEDBACK_CALLBACK_PREFIX))
-                        .endpoint(on_unit_report_callback),
-                )
-                .branch(
-                    filter(utils::callback_prefix_filter(
-                        UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX,
-                    ))
-                    .endpoint(on_unit_accept_report_callback),
-                )
-                .branch(
-                    filter(utils::callback_prefix_filter(TOP_CALLBACK_PREFIX))
-                        .endpoint(on_top_callback),
-                ),
-        )
-}
-
+#[rustfmt::skip]
 pub fn scheme2() -> Router {
     let mut router = Router::default();
 
     router
-        .command(w!(on_main_menu_command_new), "menu", HandlerOptions::empty()
+        .state(states!{
+            SessionState::WaitUnitReport { drop_id } => on_unit_report_message([user], drop_id),
+            SessionState::WaitBioMessage => on_bio_message([user]),
+            SessionState::WaitSupportMessage { category } => on_support_message([user], category)
+        })
+        .command(w!(on_main_menu_command), "menu", HandlerOptions::empty()
+            .only_private(true))
+        .command(w!(on_support_command), "support", HandlerOptions::empty()
+            .only_private(true))
+        .command(w!(on_bio_command), "bio", HandlerOptions::empty()
+            .only_private(true))
+        .command(w!(on_help_command), "help", HandlerOptions::empty())
+        .command(w!(on_info_command), "info", HandlerOptions::empty())
+        .command(w!(on_me_command), "me", HandlerOptions::empty())
+        .command(w!(on_add_admin_command), "add_admin", HandlerOptions::empty())
+        .command(w!(on_del_admin), "del_admin", HandlerOptions::empty())
+        .command(w!(on_change_rep), "rep", HandlerOptions::empty()
+            .required_privilege(PrivilegeLevel::Admin))
+        .command(w!(on_top_command), "top", HandlerOptions::empty())
+        .command(w!(on_unit_info_command), "unit", HandlerOptions::empty())
+        .command(w!(on_unit_report_command), "feedback", HandlerOptions::empty()
+            .only_private(true))
+        .command(w!(on_drop_command), "drop", HandlerOptions::empty()
+            .required_privilege(PrivilegeLevel::SuperAdmin))
+        .command(w!(on_ban_command), "ban", HandlerOptions::empty()
+            .required_privilege(PrivilegeLevel::Admin))
+        .command(w!(on_unban_command), "unban", HandlerOptions::empty()
+            .required_privilege(PrivilegeLevel::Admin))
+
+        .callback(w!(on_cancel_callback), CANCEL_CALLBACK, HandlerOptions::empty())
+        .callback(w!(on_help_callback), HELP_CALLBACK, HandlerOptions::empty())
+        .callback(w!(on_bio_callback), BIO_CALLBACK, HandlerOptions::empty()
+            .only_private(true))
+        .callback(w!(on_main_menu_callback),MENU_CALLBACK,HandlerOptions::empty()) // TODO: delete old message
+        .callback(w!(on_unit_info_callback), UNIT_INFO_CALLBACK, HandlerOptions::empty()) // TODO: delete old message
+        .callback(w!(on_me_callback), ME_CALLBACK, HandlerOptions::empty()) // TODO: delete old message
+        .callback(w!(on_support_callback), SUPPORT_CALLBACK, HandlerOptions::empty().check_blacklist(true)) // TODO: delete old message
+        .callback(w!(on_unit_join_callback), UNIT_JOIN_CALLBACK, HandlerOptions::empty())
+        .callback(w!(on_drops_history_callback), DROPS_HISTORY_CALLBACK, HandlerOptions::empty()) // TODO: delete old message
+        .callback(w!(on_profile_callback), PROFILE_CALLBACK_PREFIX, HandlerOptions::empty())
+        .callback(w!(on_support_selected_callback), SUPPORT_SELECTED_CALLBACK_PREFIX, HandlerOptions::empty().check_blacklist(true))
+        .callback(w!(on_unit_report_callback), UNIT_REPORT_CALLBACK_PREFIX, HandlerOptions::empty()
             .only_private(true)
-        )
-        .command(w!(on_help_command_new), "help", HandlerOptions::empty())
-        .command(w!(on_support_command_new), "support", HandlerOptions::empty()
-            .only_private(true)
-        );
-        //.command(w!(on_bio_command), "", HandlerOptions::empty())
-        //.command(w!(on_info_command), "", HandlerOptions::empty())
-        //.command(w!(on_me_command), "", HandlerOptions::empty())
-        //.command(w!(on_add_admin_command), "", HandlerOptions::empty())
-        //.command(w!(on_del_admin), "", HandlerOptions::empty())
-        //.command(w!(on_change_rep), "", HandlerOptions::empty())
-        //.command(w!(on_top_command), "", HandlerOptions::empty())
-        //.command(w!(on_unit_info_command), "", HandlerOptions::empty())
-        //.command(w!(on_unit_report_command), "", HandlerOptions::empty())
-        //.command(w!(on_drop_command), "", HandlerOptions::empty())
-        //.command(w!(on_main_menu_command), "", HandlerOptions::empty())
-        //.command(w!(on_ban_command), "", HandlerOptions::empty())
-        //.command(w!(on_unban_command), "", HandlerOptions::empty());
+            .check_blacklist(true))
+        .callback(w!(on_unit_accept_report_callback), UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, HandlerOptions::empty().required_privilege(PrivilegeLevel::Admin))
+        .callback(w!(on_top_callback), TOP_CALLBACK_PREFIX, HandlerOptions::empty()); // TODO: delete old message
 
     router
 }

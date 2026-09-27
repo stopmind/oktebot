@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use teloxide::{prelude::UserId, types::Message};
+use teloxide::prelude::UserId;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -27,13 +27,13 @@ impl FromStr for Mention {
     }
 }
 
-pub struct ParserState<'s> {
+pub struct CommandParserState<'s> {
     source: &'s str,
 }
 
-impl<'s> ParserState<'s> {
+impl<'s> CommandParserState<'s> {
     pub fn new(source: &'s str) -> Self {
-        ParserState {
+        CommandParserState {
             source: source.trim_start(),
         }
     }
@@ -58,7 +58,7 @@ impl<'s> ParserState<'s> {
 macro_rules! parser {
     [$($ty:ty),*] => {
         |args: &str| -> Option<_> {
-            let mut state = $crate::bot::args::ParserState::new(args);
+            let mut state = $crate::bot::args::CommandParserState::new(args);
             let res = ($(state.parse::<$ty>()?),*);
             if state.is_empty() {Some(res)}
             else {None}
@@ -66,12 +66,52 @@ macro_rules! parser {
     }
 }
 
-pub fn get_args(message: &Message) -> &str {
-    if let Some(text) = message.text()
-        && let Some((_, args)) = text.split_once(char::is_whitespace)
-    {
+pub fn get_args(text: &str) -> &str {
+    if let Some((_, args)) = text.split_once(char::is_whitespace) {
         args.trim_start()
     } else {
         ""
     }
 }
+
+pub trait HandlerArgs: Sized {
+    fn parse_from_command(text: &str) -> Option<Self>;
+    fn parse_from_callback(data: &str) -> Option<Self>;
+}
+
+impl HandlerArgs for () {
+    fn parse_from_command(_: &str) -> Option<Self> {
+        Some(())
+    }
+
+    fn parse_from_callback(_: &str) -> Option<Self> {
+        Some(())
+    }
+}
+
+macro_rules! args {
+    ($($ty:ident),*) => {
+        #[allow(unused)]
+        impl<$($ty),*> HandlerArgs for ($($ty,)*)
+        where $($ty: FromStr),*
+        {
+            fn parse_from_command(data: &str) -> Option<Self> {
+                let args = data[data.find(' ')?..].trim_start();
+                let mut state = CommandParserState::new(args);
+                Some((
+                    $(state.parse::<$ty>()?,)*
+                ))
+            }
+
+            fn parse_from_callback(_data: &str) -> Option<Self> {
+                todo!()
+            }
+        }
+    };
+}
+
+args!(T1);
+args!(T1, T2);
+args!(T1, T2, T3);
+args!(T1, T2, T3, T4);
+args!(T1, T2, T3, T4, T5);

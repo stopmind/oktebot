@@ -1,22 +1,21 @@
 use crate::{
     bot::{
+        router::{CallbackInfo, CommandInfo},
         scheme::{HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK, UNIT_INFO_CALLBACK},
-        session::Session,
-        utils::{UtilError, check_private, get_callback_chat, menu_button, try_delete_origin},
+        session::{SessionState, Sessions},
+        utils::{check_private, menu_button},
     },
     config::Config,
     oknoid::OknoId,
 };
 use std::sync::Arc;
 use teloxide::{
-    RequestError,
-    dispatching::dialogue::GetChatId,
     prelude::*,
     types::{
         BotCommand, Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Me, ParseMode,
     },
+    RequestError,
 };
-use crate::bot::router::CommandInfo;
 
 mod args;
 mod command;
@@ -33,6 +32,7 @@ pub struct BotContext {
     pub config: Arc<Config>,
     pub db: OknoId,
     pub me: Me,
+    pub sessions: Sessions,
 }
 
 pub async fn invalid_usage_message(bot: &Bot, chat_id: ChatId) -> Result<(), RequestError> {
@@ -48,21 +48,16 @@ pub async fn invalid_usage_message(bot: &Bot, chat_id: ChatId) -> Result<(), Req
 }
 
 pub async fn on_cancel_callback(
-    bot: Bot,
-    query: CallbackQuery,
-    session: Session,
+    ctx: &BotContext,
+    info: &CallbackInfo,
+    _args: (),
 ) -> anyhow::Result<()> {
-    session.exit().await?;
-    if let Some(message) = query.regular_message() {
-        bot.edit_message_text(message.chat.id, message.id, "Отменено.")
-            .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
-            .await?;
-    } else {
-        bot.send_message(session.chat_id(), "Отменено.")
-            .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
-            .await?;
-    }
-    bot.answer_callback_query(query.id).await?;
+    ctx.sessions.set(info.from.id, SessionState::Empty);
+    ctx.bot
+        .send_message(info.message.chat().id, "Отменено.")
+        .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
+        .await?;
+
     Ok(())
 }
 
@@ -120,30 +115,16 @@ pub async fn send_help_message(
 }
 
 pub async fn on_help_callback(
-    bot: Bot,
-    db: Arc<OknoId>,
-    callback: CallbackQuery,
-) -> anyhow::Result<()> {
-    bot.answer_callback_query(callback.id.clone()).await?;
-
-    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
-
-    send_help_message(&bot, chat_id, &db, callback.from.id).await?;
-    Ok(())
-}
-
-pub async fn on_help_command(bot: Bot, db: Arc<OknoId>, message: Message) -> anyhow::Result<()> {
-    let user = message.from.ok_or(UtilError::FailedGetUser)?;
-
-    send_help_message(&bot, message.chat.id, &db, user.id).await?;
-    Ok(())
-}
-
-pub async fn on_help_command_new(
     ctx: &BotContext,
-    info: &CommandInfo,
-    _: ()
+    info: &CallbackInfo,
+    _args: (),
 ) -> anyhow::Result<()> {
+    let chat_id = info.message.chat().id;
+    send_help_message(&ctx.bot, chat_id, &ctx.db, info.from.id).await?;
+    Ok(())
+}
+
+pub async fn on_help_command(ctx: &BotContext, info: &CommandInfo, _: ()) -> anyhow::Result<()> {
     send_help_message(&ctx.bot, info.chat.id, &ctx.db, info.from.id).await?;
     Ok(())
 }
@@ -193,30 +174,20 @@ pub async fn main_menu(bot: &Bot, config: &Config, chat: &Chat) -> anyhow::Resul
 
     Ok(())
 }
-pub async fn on_main_menu_command(
-    bot: Bot,
-    config: Arc<Config>,
-    message: Message,
-) -> anyhow::Result<()> {
-    main_menu(&bot, &config, &message.chat).await
-}
 
-pub async fn on_main_menu_command_new(
+pub async fn on_main_menu_command(
     ctx: &BotContext,
     info: &CommandInfo,
-    _: ()
+    _: (),
 ) -> anyhow::Result<()> {
     main_menu(&ctx.bot, &ctx.config, &info.chat).await
 }
 
 pub async fn on_main_menu_callback(
-    bot: Bot,
-    config: Arc<Config>,
-    callback: CallbackQuery,
+    ctx: &BotContext,
+    info: &CallbackInfo,
+    _: (),
 ) -> anyhow::Result<()> {
-    let chat = get_callback_chat(&callback)?;
-    main_menu(&bot, &config, chat).await?;
-    try_delete_origin(&bot, &callback).await?;
-    bot.answer_callback_query(callback.id).await?;
+    main_menu(&ctx.bot, &ctx.config, info.message.chat()).await?;
     Ok(())
 }

@@ -1,32 +1,27 @@
 use crate::{
     bot::{
-        args::{Mention, get_args},
-        invalid_usage_message,
-        scheme::{
-            BIO_CALLBACK, CANCEL_CALLBACK, MENU_CALLBACK, PROFILE_CALLBACK_PREFIX,
-            TOP_CALLBACK_PREFIX,
-        },
-        session::{Session, SessionState},
+        args::Mention,
+        router::{CallbackInfo, CommandInfo},
+        scheme::{BIO_CALLBACK, CANCEL_CALLBACK, MENU_CALLBACK, TOP_CALLBACK_PREFIX},
+        session::{SessionState, Sessions},
         utils::{
-            UtilError, UtilResult, check_private, check_user_privileges, check_user_super_admin,
-            get_callback_chat, get_exactly_one_user, get_id_names, menu_button, try_delete_origin,
+            check_private, get_exactly_one_user, get_id_names, menu_button, UtilError, UtilResult,
         },
+        BotContext,
     },
     config::Config,
     oknoid::{OknoId, Role, UserInfo},
-    parser,
 };
 use log::error;
 use std::{fmt::Write, iter, sync::Arc};
 use teloxide::{
-    Bot,
-    dispatching::dialogue::GetChatId,
     payloads::{SendMessageSetters, SendPhotoSetters},
-    prelude::{CallbackQuery, ChatId, Message, Requester, UserId},
+    prelude::{ChatId, Message, Requester, UserId},
     types::{
         Chat, ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup,
         InputFile, ParseMode, User,
     },
+    Bot,
 };
 
 async fn check_registration_inner(db: &OknoId, user: Option<&User>) -> UtilResult<()> {
@@ -62,9 +57,9 @@ pub async fn check_registration(db: Arc<OknoId>, message: Message) {
     }
 }
 
-async fn bio(bot: &Bot, session: &Session, chat: &Chat) -> anyhow::Result<()> {
+async fn bio(bot: &Bot, sessions: &Sessions, user_id: UserId, chat: &Chat) -> anyhow::Result<()> {
     check_private(bot, chat).await?;
-    session.update(SessionState::WaitBioMessage).await?;
+    sessions.set(user_id, SessionState::WaitBioMessage);
 
     bot.send_message(
         chat.id,
@@ -78,52 +73,47 @@ async fn bio(bot: &Bot, session: &Session, chat: &Chat) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn on_bio_command(bot: Bot, session: Session, message: Message) -> anyhow::Result<()> {
-    bio(&bot, &session, &message.chat).await?;
+pub async fn on_bio_command(ctx: &BotContext, info: &CommandInfo, _args: ()) -> anyhow::Result<()> {
+    bio(&ctx.bot, &ctx.sessions, info.from.id, &info.chat).await?;
     Ok(())
 }
 
 pub async fn on_bio_callback(
-    bot: Bot,
-    session: Session,
-    callback: CallbackQuery,
+    ctx: &BotContext,
+    info: &CallbackInfo,
+    _: (),
 ) -> anyhow::Result<()> {
-    let chat = get_callback_chat(&callback)?;
-    bio(&bot, &session, chat).await?;
-    bot.answer_callback_query(callback.id).await?;
+    bio(&ctx.bot, &ctx.sessions, info.from.id, info.message.chat()).await?;
     Ok(())
 }
 
 pub async fn on_bio_message(
-    bot: Bot,
-    session: Session,
-    message: Message,
-    db: Arc<OknoId>,
+    ctx: &BotContext,
+    message: &Message,
+    (user,): (&User,)
 ) -> anyhow::Result<()> {
     let Some(text) = message.text() else {
-        bot.send_message(message.chat.id, "Отправьте сообщение с текстом!")
+        ctx.bot.send_message(message.chat.id, "Отправьте сообщение с текстом!")
             .await?;
         return Ok(());
     };
 
     if text.trim().is_empty() {
-        bot.send_message(message.chat.id, "Описание не может быть пустым! >:(")
+        ctx.bot.send_message(message.chat.id, "Описание не может быть пустым! >:(")
             .await?;
         return Ok(());
     }
 
-    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
+    ctx.sessions.set(user.id, SessionState::Empty);
 
-    session.exit().await?;
-
-    let result = db.set_bio(user.id, Some(text)).await;
+    let result = ctx.db.set_bio(user.id, Some(text)).await;
     if let Err(error) = result {
-        bot.send_message(message.chat.id, "Не удалось изменить описание.")
+        ctx.bot.send_message(message.chat.id, "Не удалось изменить описание.")
             .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
             .await?;
         Err(error.into())
     } else {
-        bot.send_message(message.chat.id, "Описание профиля обновлено.")
+        ctx.bot.send_message(message.chat.id, "Описание профиля обновлено.")
             .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
             .await?;
         Ok(())
@@ -174,117 +164,89 @@ async fn send_profile(
     Ok(())
 }
 
-pub async fn on_info_command(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
-    let args = get_args(&message);
-    if let Some(mention) = parser![Mention](args) {
-        let user_id = get_exactly_one_user(&bot, &db, message.chat.id, &mention).await?;
-
-        send_profile(&bot, &db, message.chat.id, user_id, false, false).await?;
-    } else {
-        invalid_usage_message(&bot, message.chat.id).await?;
-    }
-
+pub async fn on_info_command(
+    ctx: &BotContext,
+    info: &CommandInfo,
+    (mention,): (Mention,),
+) -> anyhow::Result<()> {
+    let user_id = get_exactly_one_user(&ctx.bot, &ctx.db, info.chat.id, &mention).await?;
+    send_profile(&ctx.bot, &ctx.db, info.chat.id, user_id, false, false).await?;
     Ok(())
 }
 
-pub async fn on_me_command(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
-    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
-
-    send_profile(&bot, &db, message.chat.id, user.id, true, false).await
+pub async fn on_me_command(ctx: &BotContext, info: &CommandInfo, _args: ()) -> anyhow::Result<()> {
+    send_profile(&ctx.bot, &ctx.db, info.chat.id, info.from.id, true, false).await
 }
 
-pub async fn on_me_callback(
-    bot: Bot,
-    db: Arc<OknoId>,
-    callback: CallbackQuery,
-) -> anyhow::Result<()> {
-    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
-
-    send_profile(&bot, &db, chat_id, callback.from.id, true, true).await?;
-    try_delete_origin(&bot, &callback).await?;
-    bot.answer_callback_query(callback.id).await?;
+pub async fn on_me_callback(ctx: &BotContext, info: &CallbackInfo, _: ()) -> anyhow::Result<()> {
+    let chat_id = info.message.chat().id;
+    send_profile(&ctx.bot, &ctx.db, chat_id, info.from.id, true, true).await?;
     Ok(())
 }
 
 pub async fn on_profile_callback(
-    bot: Bot,
-    db: Arc<OknoId>,
-    callback: CallbackQuery,
+    ctx: &BotContext,
+    info: &CallbackInfo,
+    (user_id,): (u64,),
 ) -> anyhow::Result<()> {
-    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
+    let chat_id = info.message.chat().id;
+    let user_id = UserId(user_id);
 
-    let callback_data = callback
-        .data
-        .as_ref()
-        .ok_or(UtilError::FailedParseCallbackData)?;
-
-    let user_id = callback_data[PROFILE_CALLBACK_PREFIX.len()..]
-        .parse()
-        .map_err(|_| UtilError::FailedParseCallbackData)
-        .map(UserId)?;
-
-    send_profile(&bot, &db, chat_id, user_id, false, false).await?;
-    bot.answer_callback_query(callback.id).await?;
-
+    send_profile(&ctx.bot, &ctx.db, chat_id, user_id, false, false).await?;
     Ok(())
 }
 
 pub async fn on_add_admin_command(
-    bot: Bot,
-    message: Message,
-    db: Arc<OknoId>,
+    ctx: &BotContext,
+    info: &CommandInfo,
+    (mention,): (Mention,),
 ) -> anyhow::Result<()> {
-    let args = get_args(&message);
-    if let Some(mention) = parser![Mention](args) {
-        let id = get_exactly_one_user(&bot, &db, message.chat.id, &mention).await?;
+    let id = get_exactly_one_user(&ctx.bot, &ctx.db, info.chat.id, &mention).await?;
 
-        if db.give_role(id, Role::Admin).await? {
-            bot.send_message(message.chat.id, "Пользователь назначен админом.")
-                .await?;
-        } else {
-            bot.send_message(message.chat.id, "Пользователь уже является админом.")
-                .await?;
-        }
-    } else {
-        invalid_usage_message(&bot, message.chat.id).await?;
-    }
-    Ok(())
-}
-
-pub async fn on_del_admin(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
-    let args = get_args(&message);
-    if let Some(mention) = parser![Mention](args) {
-        let id = get_exactly_one_user(&bot, &db, message.chat.id, &mention).await?;
-
-        if db.take_role(id, Role::Admin).await? {
-            bot.send_message(message.chat.id, "Пользователь более не является админом.")
-                .await?;
-        } else {
-            bot.send_message(message.chat.id, "Пользователь не админ.")
-                .await?;
-        }
-    } else {
-        invalid_usage_message(&bot, message.chat.id).await?;
-    }
-
-    Ok(())
-}
-
-pub async fn on_change_rep(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
-    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
-
-    check_user_privileges(&bot, &db, user.id, message.chat.id).await?;
-
-    let args = get_args(&message);
-    if let Some((mention, value)) = parser![Mention, i64](args) {
-        let target_id = get_exactly_one_user(&bot, &db, message.chat.id, &mention).await?;
-        let new_rep = db.add_reputation(target_id, value).await?;
-
-        bot.send_message(message.chat.id, format!("Обновленная репутация: {new_rep}"))
+    if ctx.db.give_role(id, Role::Admin).await? {
+        ctx.bot
+            .send_message(info.chat.id, "Пользователь назначен админом.")
             .await?;
     } else {
-        invalid_usage_message(&bot, message.chat.id).await?;
+        ctx.bot
+            .send_message(info.chat.id, "Пользователь уже является админом.")
+            .await?;
     }
+
+    Ok(())
+}
+
+pub async fn on_del_admin(
+    ctx: &BotContext,
+    info: &CommandInfo,
+    (mention,): (Mention,),
+) -> anyhow::Result<()> {
+    let id = get_exactly_one_user(&ctx.bot, &ctx.db, info.chat.id, &mention).await?;
+
+    if ctx.db.take_role(id, Role::Admin).await? {
+        ctx.bot
+            .send_message(info.chat.id, "Пользователь более не является админом.")
+            .await?;
+    } else {
+        ctx.bot
+            .send_message(info.chat.id, "Пользователь не админ.")
+            .await?;
+    }
+
+    Ok(())
+}
+
+pub async fn on_change_rep(
+    ctx: &BotContext,
+    info: &CommandInfo,
+    (mention, rep): (Mention, i64),
+) -> anyhow::Result<()> {
+    let target_id = get_exactly_one_user(&ctx.bot, &ctx.db, info.chat.id, &mention).await?;
+    let new_rep = ctx.db.add_reputation(target_id, rep).await?;
+
+    ctx.bot
+        .send_message(info.chat.id, format!("Обновленная репутация: {new_rep}"))
+        .await?;
 
     Ok(())
 }
@@ -352,77 +314,63 @@ async fn top(
     Ok(())
 }
 
-pub async fn on_top_command(
-    bot: Bot,
-    db: Arc<OknoId>,
-    config: Arc<Config>,
-    message: Message,
-) -> anyhow::Result<()> {
-    top(&bot, &db, &config, message.chat.id, 0).await
+pub async fn on_top_command(ctx: &BotContext, info: &CommandInfo, _args: ()) -> anyhow::Result<()> {
+    top(&ctx.bot, &ctx.db, &ctx.config, info.chat.id, 0).await
 }
 
 pub async fn on_top_callback(
-    bot: Bot,
-    db: Arc<OknoId>,
-    config: Arc<Config>,
-    callback: CallbackQuery,
+    ctx: &BotContext,
+    info: &CallbackInfo,
+    (page,): (u32,),
 ) -> anyhow::Result<()> {
-    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
-    let data = callback.data.as_deref().ok_or(UtilError::NoCallbackData)?;
-
-    let page = data[TOP_CALLBACK_PREFIX.len()..].parse()?;
-    top(&bot, &db, &config, chat_id, page).await?;
-    try_delete_origin(&bot, &callback).await?;
-    bot.answer_callback_query(callback.id).await?;
+    let chat = info.message.chat();
+    top(&ctx.bot, &ctx.db, &ctx.config, chat.id, page).await?;
     Ok(())
 }
 
 async fn change_banned_state_command(
-    bot: &Bot,
-    db: &OknoId,
-    message: &Message,
+    ctx: &BotContext,
+    info: &CommandInfo,
+    mention: Mention,
     banned: bool,
 ) -> anyhow::Result<()> {
-    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
+    let target = get_exactly_one_user(&ctx.bot, &ctx.db, info.chat.id, &mention).await?;
 
-    check_user_super_admin(bot, db, user.id, message.chat.id).await?;
-
-    let args = get_args(message);
-
-    if let Some(mention) = parser![Mention](args) {
-        let target = get_exactly_one_user(bot, db, message.chat.id, &mention).await?;
-
-        let changed = db.is_user_banned(target).await? != banned;
-        if changed {
-            db.set_user_banned(target, banned).await?;
-        }
-
-        let response = if banned {
-            if changed {
-                "Пользователь забанен."
-            } else {
-                "Пользователь уже был забанен."
-            }
-        } else {
-            if changed {
-                "Пользователь более не забанен."
-            } else {
-                "Пользователь не был забанен."
-            }
-        };
-
-        bot.send_message(message.chat.id, response).await?;
-    } else {
-        invalid_usage_message(bot, message.chat.id).await?;
+    let changed = ctx.db.is_user_banned(target).await? != banned;
+    if changed {
+        ctx.db.set_user_banned(target, banned).await?;
     }
 
+    let response = if banned {
+        if changed {
+            "Пользователь забанен."
+        } else {
+            "Пользователь уже был забанен."
+        }
+    } else {
+        if changed {
+            "Пользователь более не забанен."
+        } else {
+            "Пользователь не был забанен."
+        }
+    };
+
+    ctx.bot.send_message(info.chat.id, response).await?;
     Ok(())
 }
 
-pub async fn on_ban_command(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
-    change_banned_state_command(&bot, &db, &message, true).await
+pub async fn on_ban_command(
+    ctx: &BotContext,
+    info: &CommandInfo,
+    (mention,): (Mention,),
+) -> anyhow::Result<()> {
+    change_banned_state_command(ctx, info, mention, true).await
 }
 
-pub async fn on_unban_command(bot: Bot, message: Message, db: Arc<OknoId>) -> anyhow::Result<()> {
-    change_banned_state_command(&bot, &db, &message, false).await
+pub async fn on_unban_command(
+    ctx: &BotContext,
+    info: &CommandInfo,
+    (mention,): (Mention,),
+) -> anyhow::Result<()> {
+    change_banned_state_command(ctx, info, mention, false).await
 }
