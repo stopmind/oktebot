@@ -3,6 +3,7 @@ use crate::{
     oknoid::{IdError, Names, OknoId},
 };
 use std::{borrow::Cow, fmt::Write, ops::Not};
+use std::fmt::Display;
 use teloxide::{
     requests::Requester,
     types::{CallbackQuery, Chat, ChatId, ChatKind, InlineKeyboardButton, Recipient, User, UserId},
@@ -192,4 +193,16 @@ pub async fn check_banned(
     } else {
         Ok(())
     }
+}
+
+#[macro_export]
+macro_rules! fmt_callback {
+    [$name:expr $(, $arg:expr)*] => {
+        {
+            use std::fmt::Write;
+            let mut result = format!("{}", $name);
+            $(write!(result, ":{}", $arg).unwrap();)*
+            result
+        }
+    };
 }

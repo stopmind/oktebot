@@ -1,16 +1,12 @@
-use crate::{
-    bot::{
-        router::{CallbackInfo, CommandInfo},
-        scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX, SUPPORT_SELECTED_CALLBACK_PREFIX},
-        session::SessionState,
-        utils::{
-            check_banned, check_private, menu_button
-        },
-        BotContext,
+use crate::{bot::{
+    router::{CallbackInfo, CommandInfo},
+    scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX, SUPPORT_SELECTED_CALLBACK_PREFIX},
+    session::SessionState,
+    utils::{
+        check_banned, check_private, menu_button
     },
-    config::Config,
-    oknoid::OknoId,
-};
+    BotContext,
+}, config::Config, fmt_callback, oknoid::OknoId};
 use anyhow::{anyhow, Result};
 use std::{
     fmt::{Display, Formatter}
@@ -21,7 +17,7 @@ use teloxide::{
 };
 use teloxide::types::User;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum SupportCategory {
     ChangeSubmit = 0,
     SuggestDrop = 1,
@@ -63,7 +59,7 @@ impl Display for SupportCategory {
 pub fn choice_button(category: SupportCategory) -> InlineKeyboardButton {
     InlineKeyboardButton::callback(
         category.as_str(),
-        format!("{SUPPORT_SELECTED_CALLBACK_PREFIX}{}", category as usize),
+        fmt_callback![SUPPORT_SELECTED_CALLBACK_PREFIX, category as usize],
     )
 }
 
@@ -135,7 +131,7 @@ pub async fn on_support_message(
 ) -> Result<()> {
     ctx.sessions.set(user.id, SessionState::Empty);
 
-    let callback = format!("{PROFILE_CALLBACK_PREFIX}{}", user.id);
+    let callback =  fmt_callback!(PROFILE_CALLBACK_PREFIX, user.id);
 
     ctx.bot.forward_message(ctx.config.support_chat, message.chat.id, message.id)
         .await?;

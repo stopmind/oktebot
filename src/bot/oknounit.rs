@@ -1,24 +1,20 @@
-use crate::{
-    bot::{
-        args::get_args,
-        invalid_usage_message,
-        router::{CallbackInfo, CommandInfo},
-        scheme::{
-            CANCEL_CALLBACK, DROPS_HISTORY_CALLBACK, MENU_CALLBACK, PROFILE_CALLBACK_PREFIX,
-            UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, UNIT_INFO_CALLBACK, UNIT_JOIN_CALLBACK,
-            UNIT_REPORT_CALLBACK_PREFIX,
-        },
-        session::{SessionState, Sessions},
-        support,
-        support::SupportCategory,
-        utils::{check_banned, menu_button, UtilError},
-        BotContext,
+use crate::{bot::{
+    args::get_args,
+    invalid_usage_message,
+    router::{CallbackInfo, CommandInfo},
+    scheme::{
+        CANCEL_CALLBACK, DROPS_HISTORY_CALLBACK, MENU_CALLBACK, PROFILE_CALLBACK_PREFIX,
+        UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, UNIT_INFO_CALLBACK, UNIT_JOIN_CALLBACK,
+        UNIT_REPORT_CALLBACK_PREFIX,
     },
-    config::Config,
-    oknoid::{DropId, OknoId, Role},
-};
+    session::{SessionState, Sessions},
+    support,
+    support::SupportCategory,
+    utils::{check_banned, menu_button, UtilError},
+    BotContext,
+}, config::Config, fmt_callback, oknoid::{DropId, OknoId, Role}};
 use log::error;
-use std::{fmt::Write, iter, sync::Arc};
+use std::{fmt::Write, iter};
 use teloxide::{
     payloads::{EditMessageReplyMarkupSetters, SendMessageSetters, SendPhotoSetters},
     requests::{Request, Requester},
@@ -72,7 +68,7 @@ async fn unit_info(
                 .map(|(i, drop)| {
                     [InlineKeyboardButton::callback(
                         format!("Я оставил фидбек для {}", i + 1),
-                        format!("{UNIT_REPORT_CALLBACK_PREFIX}{}", drop.id),
+                        fmt_callback![UNIT_REPORT_CALLBACK_PREFIX, drop.id]
                     )]
                 })
                 .chain(iter::once([support::choice_button(
@@ -194,7 +190,7 @@ pub async fn on_unit_accept_report_callback(
             .reply_markup(InlineKeyboardMarkup::new([[
                 InlineKeyboardButton::callback(
                     "Описание профиля",
-                    format!("{PROFILE_CALLBACK_PREFIX}-{}", unit_id),
+                    fmt_callback![PROFILE_CALLBACK_PREFIX, unit_id],
                 ),
             ]]))
             .await?;
@@ -231,28 +227,19 @@ pub async fn on_unit_report_message(
     .reply_markup(InlineKeyboardMarkup::new([
         [InlineKeyboardButton::callback(
             "Описание профиля",
-            format!("{PROFILE_CALLBACK_PREFIX}{}", user.id),
+            fmt_callback![PROFILE_CALLBACK_PREFIX, user.id],
         )],
         [InlineKeyboardButton::callback(
             "Подтвердить +1",
-            format!(
-                "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-1",
-                user.id
-            ),
+            fmt_callback![UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, user.id, drop_id, 1],
         )],
         [InlineKeyboardButton::callback(
             "Подтвердить +2",
-            format!(
-                "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-2",
-                user.id
-            ),
+            fmt_callback![UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, user.id, drop_id, 2],
         )],
         [InlineKeyboardButton::callback(
             "Подтвердить +3",
-            format!(
-                "{UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX}{}-{drop_id}-3",
-                user.id
-            ),
+            fmt_callback![UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, user.id, drop_id, 3],
         )],
     ]))
     .await?;
@@ -342,7 +329,7 @@ pub async fn on_drop_command(
     );
     let markup = InlineKeyboardMarkup::new([[InlineKeyboardButton::callback(
         "Я оставил фидбек",
-        format!("{UNIT_REPORT_CALLBACK_PREFIX}{drop_id}"),
+        fmt_callback![UNIT_REPORT_CALLBACK_PREFIX, drop_id]
     )]]);
 
     let mut request = ctx.bot.send_message(UserId(0), text).reply_markup(markup);

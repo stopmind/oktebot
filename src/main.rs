@@ -3,7 +3,7 @@ mod config;
 mod oknoid;
 
 use crate::{
-    bot::{scheme::scheme2, session::Sessions, set_commands, BotContext},
+    bot::{scheme::scheme, session::Sessions, set_commands, BotContext},
     config::Config,
     oknoid::OknoId,
 };
@@ -35,7 +35,7 @@ async fn start() -> anyhow::Result<()> {
 
     let me = bot.get_me().await?;
 
-    let router = Arc::new(scheme2());
+    let router = Arc::new(scheme());
     router
         .handle_updates(Arc::new(BotContext {
             bot,

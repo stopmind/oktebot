@@ -1,17 +1,13 @@
-use crate::{
-    bot::{
-        args::Mention,
-        router::{CallbackInfo, CommandInfo},
-        scheme::{BIO_CALLBACK, CANCEL_CALLBACK, MENU_CALLBACK, TOP_CALLBACK_PREFIX},
-        session::{SessionState, Sessions},
-        utils::{
-            check_private, get_exactly_one_user, get_id_names, menu_button, UtilError, UtilResult,
-        },
-        BotContext,
+use crate::{bot::{
+    args::Mention,
+    router::{CallbackInfo, CommandInfo},
+    scheme::{BIO_CALLBACK, CANCEL_CALLBACK, MENU_CALLBACK, TOP_CALLBACK_PREFIX},
+    session::{SessionState, Sessions},
+    utils::{
+        check_private, get_exactly_one_user, get_id_names, menu_button, UtilError, UtilResult,
     },
-    config::Config,
-    oknoid::{OknoId, Role, UserInfo},
-};
+    BotContext,
+}, config::Config, fmt_callback, oknoid::{OknoId, Role, UserInfo}};
 use log::error;
 use std::{fmt::Write, iter, sync::Arc};
 use teloxide::{
@@ -290,13 +286,13 @@ async fn top(
             (page > 0).then(|| {
                 [InlineKeyboardButton::callback(
                     "< Предыдущая страница",
-                    format!("{TOP_CALLBACK_PREFIX}{}", page - 1),
+                    fmt_callback![TOP_CALLBACK_PREFIX, page - 1]
                 )]
             }),
             (page + 1 < pages_count).then(|| {
                 [InlineKeyboardButton::callback(
                     "Следующая страница >",
-                    format!("{TOP_CALLBACK_PREFIX}{}", page + 1),
+                    fmt_callback![TOP_CALLBACK_PREFIX, page + 1]
                 )]
             }),
             Some([menu_button()]),

@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::bail;
 use futures::{future::BoxFuture, FutureExt, StreamExt};
-use log::error;
+use log::{error, warn};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use teloxide::{
     requests::Requester,
@@ -16,6 +16,7 @@ use teloxide::{
     update_listeners::AsUpdateStream,
     Bot,
 };
+use crate::bot::args::{CallbackParsingState, CommandParsingState};
 use crate::bot::invalid_usage_message;
 
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
@@ -26,12 +27,12 @@ pub enum PrivilegeLevel {
     SuperAdmin,
 }
 
-//TODO: add remove old message
 #[derive(Default, Copy, Clone)]
 pub struct HandlerOptions {
     pub only_private: bool,
     pub check_blacklist: bool,
     pub required_privilege: PrivilegeLevel,
+    pub remove_old_message: bool,
 }
 
 impl HandlerOptions {
@@ -49,6 +50,11 @@ impl HandlerOptions {
     }
     pub fn required_privilege(mut self, val: PrivilegeLevel) -> Self {
         self.required_privilege = val;
+        self
+    }
+
+    pub fn remove_old_message(mut self, val: bool) -> Self {
+        self.remove_old_message = val;
         self
     }
 
@@ -113,7 +119,8 @@ impl CommandHandler {
         Self {
             opts,
             func: Box::new(move |ctx, info| {
-                if let Some(args) = HandlerArgs::parse_from_command(info.text.as_str()) {
+                let mut state = CommandParsingState::new(info.text.as_str());
+                if let Some(args) = HandlerArgs::parse_from_state(&mut state) {
                     f(ctx, info, args)
                 } else {
                     invalid_usage_message(&ctx.bot, info.chat.id)
@@ -155,7 +162,9 @@ impl CallbackHandler {
         Self {
             opts,
             func: Box::new(move |ctx, info| {
-                HandlerArgs::parse_from_callback(info.data.as_str()).map(|args| f(ctx, info, args))
+                let mut state = CallbackParsingState::new(info.data.as_str());
+                HandlerArgs::parse_from_state(&mut state)
+                    .map(|args| f(ctx, info, args))
             }),
         }
     }
@@ -229,7 +238,11 @@ impl Router {
     }
 
     async fn handle_message(&self, ctx: &BotContext, message: Message) -> anyhow::Result<()> {
-        // TODO: handle non command messages
+        if let Some(future) = self.state_handler.as_ref()
+            .and_then(|handler| handler(ctx, &message))
+        {
+            return future.await;
+        }
 
         let Message {
             id,
@@ -324,6 +337,12 @@ impl Router {
             .await?;
 
         if allowed {
+            if handler.opts.remove_old_message
+                && let Err(err) = ctx.bot.delete_message(message.chat().id, message.id()).await
+            {
+                warn!("Failed to delete old message: {}", err);
+            }
+
             let info = CallbackInfo {
                 data,
                 message,

@@ -22,10 +22,10 @@ pub const SUPPORT_CALLBACK: &str = "support";
 pub const ME_CALLBACK: &str = "me";
 pub const UNIT_INFO_CALLBACK: &str = "unit-info";
 pub const TOP_CALLBACK_PREFIX: &str = "top";
-pub const TOP_CALLBACK: &str = "top0";
+pub const TOP_CALLBACK: &str = "top:0";
 
 #[rustfmt::skip]
-pub fn scheme2() -> Router {
+pub fn scheme() -> Router {
     let mut router = Router::default();
 
     router
@@ -62,19 +62,28 @@ pub fn scheme2() -> Router {
         .callback(w!(on_help_callback), HELP_CALLBACK, HandlerOptions::empty())
         .callback(w!(on_bio_callback), BIO_CALLBACK, HandlerOptions::empty()
             .only_private(true))
-        .callback(w!(on_main_menu_callback),MENU_CALLBACK,HandlerOptions::empty()) // TODO: delete old message
-        .callback(w!(on_unit_info_callback), UNIT_INFO_CALLBACK, HandlerOptions::empty()) // TODO: delete old message
-        .callback(w!(on_me_callback), ME_CALLBACK, HandlerOptions::empty()) // TODO: delete old message
-        .callback(w!(on_support_callback), SUPPORT_CALLBACK, HandlerOptions::empty().check_blacklist(true)) // TODO: delete old message
+        .callback(w!(on_main_menu_callback),MENU_CALLBACK,HandlerOptions::empty()
+            .remove_old_message(true))
+        .callback(w!(on_unit_info_callback), UNIT_INFO_CALLBACK, HandlerOptions::empty()
+            .remove_old_message(true))
+        .callback(w!(on_me_callback), ME_CALLBACK, HandlerOptions::empty()
+            .remove_old_message(true))
+        .callback(w!(on_support_callback), SUPPORT_CALLBACK, HandlerOptions::empty()
+            .check_blacklist(true)
+            .remove_old_message(true))
         .callback(w!(on_unit_join_callback), UNIT_JOIN_CALLBACK, HandlerOptions::empty())
-        .callback(w!(on_drops_history_callback), DROPS_HISTORY_CALLBACK, HandlerOptions::empty()) // TODO: delete old message
+        .callback(w!(on_drops_history_callback), DROPS_HISTORY_CALLBACK, HandlerOptions::empty()
+            .remove_old_message(true))
         .callback(w!(on_profile_callback), PROFILE_CALLBACK_PREFIX, HandlerOptions::empty())
-        .callback(w!(on_support_selected_callback), SUPPORT_SELECTED_CALLBACK_PREFIX, HandlerOptions::empty().check_blacklist(true))
+        .callback(w!(on_support_selected_callback), SUPPORT_SELECTED_CALLBACK_PREFIX, HandlerOptions::empty()
+            .check_blacklist(true))
         .callback(w!(on_unit_report_callback), UNIT_REPORT_CALLBACK_PREFIX, HandlerOptions::empty()
             .only_private(true)
             .check_blacklist(true))
-        .callback(w!(on_unit_accept_report_callback), UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, HandlerOptions::empty().required_privilege(PrivilegeLevel::Admin))
-        .callback(w!(on_top_callback), TOP_CALLBACK_PREFIX, HandlerOptions::empty()); // TODO: delete old message
+        .callback(w!(on_unit_accept_report_callback), UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, HandlerOptions::empty()
+            .required_privilege(PrivilegeLevel::Admin))
+        .callback(w!(on_top_callback), TOP_CALLBACK_PREFIX, HandlerOptions::empty()
+            .remove_old_message(true));
 
     router
 }
