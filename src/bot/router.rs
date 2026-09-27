@@ -181,8 +181,8 @@ pub struct Router {
 impl Router {
     pub fn callback<Func, Args>(
         &mut self,
-        func: Func,
         callback: impl Into<String>,
+        func: Func,
         opts: HandlerOptions,
     ) -> &mut Self
     where
@@ -201,8 +201,8 @@ impl Router {
 
     pub fn command<Func, Args>(
         &mut self,
-        func: Func,
         command: impl Into<String>,
+        func: Func,
         opts: HandlerOptions,
     ) -> &mut Self
     where
