@@ -1,3 +1,4 @@
+use crate::bot::router::{HandlerOptions, Router};
 use crate::bot::{command::Command, oknounit::{
     on_drop_command, on_drops_history_callback, on_unit_accept_report_callback,
     on_unit_info_callback, on_unit_info_command, on_unit_join_callback,
@@ -6,15 +7,14 @@ use crate::bot::{command::Command, oknounit::{
     check_registration, on_add_admin_command, on_ban_command, on_bio_callback, on_bio_command,
     on_bio_message, on_change_rep, on_del_admin, on_info_command, on_me_callback,
     on_me_command, on_profile_callback, on_top_callback, on_top_command, on_unban_command,
-}, session::SessionState, support::*, utils, BotContext};
+}, session::SessionState, support::*, utils};
+use crate::w;
 use teloxide::{
-    dispatching::{UpdateHandler, dialogue, dialogue::InMemStorage},
+    dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler},
     dptree::{case, filter},
     filter_command,
     prelude::*,
 };
-use crate::bot::router::{CommandInfo, HandlerOptions, Router};
-use crate::w;
 
 pub const CANCEL_CALLBACK: &str = "cancel";
 pub const HELP_CALLBACK: &str = "help";

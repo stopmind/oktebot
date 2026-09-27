@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use log::{error, info};
-use teloxide::types::MediaKind;
+use teloxide::types::{MediaKind, MessageId};
 use teloxide::{requests::Requester, types::{
     CallbackQuery, Chat, ChatKind, MaybeInaccessibleMessage, Message, MessageCommon,
     MessageKind, Update, UpdateKind, User, UserId,
@@ -100,6 +100,7 @@ struct CommandHandler {
 }
 
 pub struct CommandInfo {
+    pub message_id: MessageId,
     pub from: User,
     pub chat: Chat,
     pub text: String,
@@ -228,15 +229,22 @@ impl Router {
             Some(pos) => &command[..pos],
         };
 
+        let mut username_specified = false;
         if let Some((command_name, username)) = command.split_once('@') {
             command = command_name;
+            username_specified = true;
             if !username.eq_ignore_ascii_case(ctx.me.username()) {
                 return Ok(());
             }
         }
 
         let Some(handler) = self.commands_actions.get(command) else {
-            //TODO: unknown command message
+            if username_specified || matches!(&chat.kind, ChatKind::Private(..)) {
+                ctx.bot.send_message(
+                    chat.id,
+                    "Неизвестная команда.",
+                ).await?;
+            }
             return Ok(());
         };
 
@@ -247,6 +255,7 @@ impl Router {
 
         if allowed {
             let info = CommandInfo {
+                message_id: id,
                 from,
                 chat,
                 text,

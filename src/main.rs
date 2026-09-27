@@ -34,17 +34,6 @@ async fn start() -> anyhow::Result<()> {
 
     set_commands(&bot).await?;
 
-    /*Dispatcher::builder(bot, scheme())
-        .dependencies(dptree::deps![
-            InMemStorage::<SessionState>::new(),
-            config,
-            Arc::new(db)
-        ])
-        .enable_ctrlc_handler()
-        .build()
-        .dispatch()
-        .await;*/
-
     let me = bot.get_me().await?;
 
     let router = Arc::new(scheme2());
