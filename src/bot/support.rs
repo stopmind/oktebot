@@ -2,11 +2,9 @@ use crate::{bot::{
     router::{CallbackInfo, CommandInfo},
     scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX, SUPPORT_SELECTED_CALLBACK_PREFIX},
     session::SessionState,
-    utils::{
-        check_banned, check_private, menu_button
-    },
+    utils::menu_button,
     BotContext,
-}, config::Config, fmt_callback, oknoid::OknoId};
+}, config::Config, fmt_callback};
 use anyhow::{anyhow, Result};
 use std::{
     fmt::{Display, Formatter}
@@ -65,14 +63,9 @@ pub fn choice_button(category: SupportCategory) -> InlineKeyboardButton {
 
 async fn support(
     bot: &Bot,
-    db: &OknoId,
     config: &Config,
     chat: &Chat,
-    user_id: UserId,
 ) -> Result<()> {
-    check_banned(bot, db, chat.id, user_id).await?;
-    check_private(bot, chat).await?;
-
     let buttons = vec![
         vec![choice_button(SupportCategory::ChangeSubmit)],
         vec![
@@ -95,12 +88,12 @@ async fn support(
 }
 
 pub async fn on_support_command(ctx: &BotContext, info: &CommandInfo, _: ()) -> Result<()> {
-    support(&ctx.bot, &ctx.db, &ctx.config, &info.chat, info.from.id).await
+    support(&ctx.bot, &ctx.config, &info.chat).await
 }
 
 pub async fn on_support_callback(ctx: &BotContext, info: &CallbackInfo, _: ()) -> Result<()> {
     let chat = info.message.chat();
-    support(&ctx.bot, &ctx.db, &ctx.config, chat, info.from.id).await?;
+    support(&ctx.bot, &ctx.config, chat).await?;
     Ok(())
 }
 

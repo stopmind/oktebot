@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 use crate::{
     bot::{args::HandlerArgs, BotContext},
     oknoid::OknoId,
@@ -101,6 +102,7 @@ struct CommandHandler {
 }
 
 pub struct CommandInfo {
+    #[allow(unused)]
     pub message_id: MessageId,
     pub from: User,
     pub chat: Chat,

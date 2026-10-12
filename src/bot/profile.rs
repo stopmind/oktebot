@@ -4,10 +4,10 @@ use crate::{bot::{
     scheme::{BIO_CALLBACK, CANCEL_CALLBACK, MENU_CALLBACK, TOP_CALLBACK_PREFIX},
     session::{SessionState, Sessions},
     utils::{
-        check_private, get_exactly_one_user, get_id_names, menu_button, UtilError, UtilResult,
+        get_exactly_one_user, menu_button, UtilResult,
     },
     BotContext,
-}, config::Config, fmt_callback, oknoid::{OknoId, Role, UserInfo}};
+}, config::Config, fmt_callback, oknoid::{OknoId, Role}};
 use log::error;
 use std::{fmt::Write, iter, sync::Arc};
 use teloxide::{
@@ -19,9 +19,11 @@ use teloxide::{
     },
     Bot,
 };
+use crate::oknoid::{Names, UserInfo};
 
+#[allow(unreachable_code, unused_variables)]
 async fn check_registration_inner(db: &OknoId, user: Option<&User>) -> UtilResult<()> {
-    let (id, names) = get_id_names(user)?;
+    let (id, names): (_, Names) = todo!();
 
     if db.check_user_exists(id) {
         db.update_names(id, names.username.as_deref(), names.first_name.as_ref())
@@ -44,6 +46,7 @@ async fn check_registration_inner(db: &OknoId, user: Option<&User>) -> UtilResul
     Ok(())
 }
 
+//TODO: add it
 pub async fn check_registration(db: Arc<OknoId>, message: Message) {
     if !matches!(message.chat.kind, ChatKind::Private(..)) {
         return;
@@ -54,7 +57,6 @@ pub async fn check_registration(db: Arc<OknoId>, message: Message) {
 }
 
 async fn bio(bot: &Bot, sessions: &Sessions, user_id: UserId, chat: &Chat) -> anyhow::Result<()> {
-    check_private(bot, chat).await?;
     sessions.set(user_id, SessionState::WaitBioMessage);
 
     bot.send_message(

@@ -10,7 +10,7 @@ use crate::{bot::{
     session::{SessionState, Sessions},
     support,
     support::SupportCategory,
-    utils::{check_banned, menu_button, UtilError},
+    utils::{menu_button, UtilError},
     BotContext,
 }, config::Config, fmt_callback, oknoid::{DropId, OknoId, Role}};
 use log::error;
@@ -261,8 +261,6 @@ async fn unit_report(
     drop_id: DropId,
     user_id: UserId,
 ) -> anyhow::Result<()> {
-    check_banned(bot, db, user_id, user_id).await?;
-
     if !db.check_drop_exists(drop_id).await? {
         bot.send_message(user_id, "Дропа с таким id не существует!")
             .await?;

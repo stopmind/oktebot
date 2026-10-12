@@ -24,7 +24,6 @@ pub struct Sessions {
     data: Mutex<BTreeMap<UserId, SessionEntry>>,
 }
 
-#[allow(unused)]
 impl Sessions {
     pub fn get(&self, id: UserId) -> SessionState {
         self.data.lock().unwrap()

@@ -3,7 +3,7 @@ use crate::{
         router::{CallbackInfo, CommandInfo},
         scheme::{HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK, UNIT_INFO_CALLBACK},
         session::{SessionState, Sessions},
-        utils::{check_private, menu_button},
+        utils::menu_button,
     },
     config::Config,
     oknoid::OknoId,
@@ -18,9 +18,8 @@ use teloxide::{
 };
 
 mod args;
-mod command;
 mod oknounit;
-mod profile;
+pub mod profile;
 mod router;
 pub mod scheme;
 pub mod session;
@@ -145,8 +144,6 @@ pub async fn set_commands(bot: &Bot) -> anyhow::Result<()> {
 }
 
 pub async fn main_menu(bot: &Bot, config: &Config, chat: &Chat) -> anyhow::Result<()> {
-    check_private(bot, chat).await?;
-
     let text = "\
         <b>OknoServant</b> - это ваш <b>помощник</b> в нашем <b>комьюнити</b>. Система <b>репутации</b>, <b>OknoUnit</b> и <b>тех.поддержка</b> - все в одном месте.\n\
         \n\
