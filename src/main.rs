@@ -1,10 +1,15 @@
 #![deny(deprecated)]
+extern crate core;
 
 mod bot;
 mod config;
 mod oknoid;
 
-use crate::{bot::set_commands, config::Config, oknoid::OknoId};
+use crate::{
+    bot::{index, set_commands},
+    config::Config,
+    oknoid::OknoId,
+};
 use anyhow::anyhow;
 use bot::{scheme::scheme, session::SessionState};
 use log::{LevelFilter, error, info};
@@ -27,16 +32,30 @@ async fn start() -> anyhow::Result<()> {
             .map_err(|e| anyhow!("failed to create storage directory: {}", e))?;
     }
 
-    let db = OknoId::open(config.clone()).await?;
+    let db = Arc::new(OknoId::open(config.clone()).await?);
     let bot = Bot::new(config.token.clone());
 
-    set_commands(&bot).await?;
+    tokio::spawn({
+        let bot = bot.clone();
+        async move {
+            if let Err(err) = set_commands(&bot).await {
+                error!("{}", err);
+            }
+        }
+    });
+
+    tokio::spawn({
+        let bot = bot.clone();
+        let config = config.clone();
+        let db = db.clone();
+        index::check_games_index_worker(bot, config, db)
+    });
 
     Dispatcher::builder(bot, scheme())
         .dependencies(dptree::deps![
             InMemStorage::<SessionState>::new(),
             config,
-            Arc::new(db)
+            db
         ])
         .enable_ctrlc_handler()
         .build()

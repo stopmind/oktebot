@@ -1,5 +1,6 @@
 use crate::bot::{
     command::Command,
+    index::on_index_command,
     oknounit::{
         on_drop_command, on_drops_history_callback, on_unit_accept_report_callback,
         on_unit_info_callback, on_unit_info_command, on_unit_join_callback,
@@ -62,7 +63,8 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                         .branch(case![Command::Drop].endpoint(on_drop_command))
                         .branch(case![Command::Menu].endpoint(on_main_menu_command))
                         .branch(case![Command::Ban].endpoint(on_ban_command))
-                        .branch(case![Command::Unban].endpoint(on_unban_command)),
+                        .branch(case![Command::Unban].endpoint(on_unban_command))
+                        .branch(case![Command::Index].endpoint(on_index_command)),
                 )
                 .branch(
                     case![SessionState::WaitSupportMessage { category }]

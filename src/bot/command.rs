@@ -19,4 +19,5 @@ pub enum Command {
     Menu,
     Ban,
     Unban,
+    Index,
 }

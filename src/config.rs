@@ -28,6 +28,7 @@ pub struct Banners {
 pub struct Config {
     pub token: String,
     pub support_chat: ChatId,
+    pub itch_token: String,
     pub banners: Banners,
     #[serde(default)]
     pub super_admins: BTreeSet<UserId>,

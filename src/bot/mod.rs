@@ -17,6 +17,7 @@ use teloxide::{
 
 mod args;
 mod command;
+pub mod index;
 mod oknounit;
 mod profile;
 pub mod scheme;
