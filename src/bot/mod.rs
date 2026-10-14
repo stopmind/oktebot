@@ -80,6 +80,7 @@ pub async fn send_help_message(
         /top - топ пользователей по репутации.\n\
         /unit - информация о OKNO Unit.\n\
         /feedback <code>&lt;drop id&gt;</code> - оставить фидбек по id дропа.\n\
+        /index <code>&lt;ссылка на игру с itch.io&gt;</code> - подписатся на индесирование игры с itch.io.\n\
     "
     .to_owned();
 
