@@ -12,37 +12,28 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use scraper::{Html, Selector};
 use teloxide::{Bot, requests::Requester, types::Message};
 use tokio::time::sleep;
 use url::Url;
 
-#[derive(Deserialize)]
-struct SearchResults {
-    games: Vec<SearchGame>,
-}
+async fn check_game_index(id: i32, title: &str) -> Result<bool> {
+    let response = reqwest::get(Url::parse_with_params("https://itch.io/search", &[("q", title)])?).await?;
+    let document = Html::parse_document(&response.text().await?);
+    let id_str = id.to_string();
 
-#[derive(Deserialize)]
-struct SearchGame {
-    id: i32,
-}
+    let selector = Selector::parse(".game_cell").unwrap();
 
-async fn search_game(token: &str, title: &str) -> Result<SearchResults> {
-    let url = Url::parse_with_params("https://api.itch.io/search/games", &[("query", title)])?;
+    info!("Title: {title} Id: {id_str}");
 
-    let results = Client::new()
-        .request(Method::GET, url)
-        .bearer_auth(token)
-        .send()
-        .await?
-        .json::<SearchResults>()
-        .await?;
+    for element in document.select(&selector) {
+        info!(" Found: {}", element.attr("data-game_id").unwrap_or("NONE"));
+        if element.attr("data-game_id") == Some(id_str.as_str()) {
+            return Ok(true);
+        }
+    }
 
-    Ok(results)
-}
-
-async fn check_game_index(token: &str, id: i32, title: &str) -> Result<bool> {
-    let search_result = search_game(token, title).await?;
-    Ok(search_result.games.iter().any(|game| game.id == id))
+    Ok(false)
 }
 
 fn data_url_from_game_url(mut game_url: Url) -> Result<Url> {
@@ -94,8 +85,7 @@ async fn get_game_data_by_id(token: &str, game_id: i32) -> Result<GameDataById> 
 pub async fn on_index_command(
     message: Message,
     db: Arc<OknoId>,
-    bot: Bot,
-    config: Arc<Config>,
+    bot: Bot
 ) -> Result<()> {
     let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
 
@@ -114,7 +104,7 @@ pub async fn on_index_command(
         };
 
         let is_indexed =
-            check_game_index(config.itch_token.as_str(), data.id, data.title.as_str()).await?;
+            check_game_index(data.id, data.title.as_str()).await?;
         if is_indexed {
             bot.send_message(message.chat.id, "Игра уже проиндексирована!")
                 .await?;
@@ -156,7 +146,7 @@ async fn check_games(bot: &Bot, db: &OknoId, itch_token: &str) -> Result<()> {
             notify_user(user_id, url).await?;
         } else {
             let data = get_game_data_by_id(itch_token, game_id).await?;
-            let is_indexed = check_game_index(itch_token, game_id, data.title.as_str()).await?;
+            let is_indexed = check_game_index(game_id, data.title.as_str()).await?;
 
             if is_indexed {
                 info!("game indexed: {game_id}");

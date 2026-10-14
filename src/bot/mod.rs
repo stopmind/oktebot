@@ -139,6 +139,7 @@ pub async fn set_commands(bot: &Bot) -> anyhow::Result<()> {
         BotCommand::new("bio", "установить описание профиля"),
         BotCommand::new("top", "топ пользователей по репутации"),
         BotCommand::new("unit", "информация о OknoUnit"),
+        BotCommand::new("index", "проверить индексацию игры"),
     ])
     .await?;
 
