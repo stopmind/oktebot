@@ -9,11 +9,16 @@ use teloxide::{
     types::{CallbackQuery, Chat, ChatId, ChatKind, InlineKeyboardButton, Recipient, User, UserId},
 };
 use thiserror::Error;
+use crate::bot::scheme::CANCEL_CALLBACK;
 
 pub const USER_BANNED: &str = "Вы забанены";
 
 pub fn menu_button() -> InlineKeyboardButton {
     InlineKeyboardButton::callback("В меню", MENU_CALLBACK)
+}
+
+pub fn cancel_button() -> InlineKeyboardButton {
+    InlineKeyboardButton::callback("Отмена", CANCEL_CALLBACK)
 }
 
 /// Requires CallbackQuery

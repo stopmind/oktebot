@@ -23,6 +23,7 @@ use teloxide::{
     filter_command,
     prelude::*,
 };
+use crate::bot::index::{on_index_callback, on_index_url_message};
 
 pub const CANCEL_CALLBACK: &str = "cancel";
 pub const HELP_CALLBACK: &str = "help";
@@ -40,6 +41,7 @@ pub const ME_CALLBACK: &str = "me";
 pub const UNIT_INFO_CALLBACK: &str = "unit-info";
 pub const TOP_CALLBACK_PREFIX: &str = "top";
 pub const TOP_CALLBACK: &str = "top0";
+pub const INDEX_CALLBACK: &str = "index";
 
 pub fn scheme() -> UpdateHandler<anyhow::Error> {
     dialogue::enter::<Update, InMemStorage<SessionState>, SessionState, _>()
@@ -74,7 +76,8 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                 .branch(
                     case![SessionState::WaitUnitReport { drop_id }]
                         .endpoint(on_unit_report_message),
-                ),
+                )
+                .branch(case![SessionState::WaitIndexUrl].endpoint(on_index_url_message)),
         )
         .branch(
             Update::filter_callback_query()
@@ -125,6 +128,10 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                 .branch(
                     filter(utils::callback_prefix_filter(TOP_CALLBACK_PREFIX))
                         .endpoint(on_top_callback),
+                )
+                .branch(
+                    filter(utils::callback_filter(INDEX_CALLBACK))
+                        .endpoint(on_index_callback),
                 ),
         )
 }

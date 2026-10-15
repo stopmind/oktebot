@@ -14,6 +14,7 @@ use teloxide::{
     prelude::*,
     types::{BotCommand, Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode},
 };
+use crate::bot::scheme::INDEX_CALLBACK;
 
 mod args;
 mod command;
@@ -170,6 +171,7 @@ pub async fn main_menu(bot: &Bot, config: &Config, chat: &Chat) -> anyhow::Resul
                 InlineKeyboardButton::url("oknoweb.ru", "https://oknoweb.ru".parse()?),
             ],
             vec![InlineKeyboardButton::callback("Мой профиль", ME_CALLBACK)],
+            vec![InlineKeyboardButton::callback("Индекс", INDEX_CALLBACK)],
         ]))
         .parse_mode(ParseMode::Html)
         .await?;

@@ -1,24 +1,34 @@
 use crate::{
-    bot::{args::get_args, utils::UtilError},
+    bot::{args::get_args, session::Session, utils::UtilError},
     config::Config,
     oknoid::OknoId,
 };
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use log::{error, info};
 use reqwest::{Client, Method};
-use serde::Deserialize;
-use std::{
-    collections::BTreeMap,
-    sync::Arc,
-    time::Duration,
-};
 use scraper::{Html, Selector};
-use teloxide::{Bot, requests::Requester, types::Message};
+use serde::Deserialize;
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use teloxide::{
+    payloads::SendMessageSetters,
+    requests::Requester,
+    types::{CallbackQuery, ChatId, Message, ParseMode, UserId},
+    Bot,
+};
+use teloxide::dispatching::dialogue::GetChatId;
+use teloxide::types::{InlineKeyboardMarkup, ReplyMarkup};
 use tokio::time::sleep;
 use url::Url;
+use crate::bot::session::SessionState;
+use crate::bot::utils;
+use crate::bot::utils::cancel_button;
 
 async fn check_game_index(id: i32, title: &str) -> Result<bool> {
-    let response = reqwest::get(Url::parse_with_params("https://itch.io/search", &[("q", title)])?).await?;
+    let response = reqwest::get(Url::parse_with_params(
+        "https://itch.io/search",
+        &[("q", title)],
+    )?)
+    .await?;
     let document = Html::parse_document(&response.text().await?);
     let id_str = id.to_string();
 
@@ -60,7 +70,7 @@ struct GameDataById {
 async fn get_game_data_by_url(url: Url) -> Result<GameDataByUrl> {
     let url = data_url_from_game_url(url)?;
 
-    let data = reqwest::get(url).await?.json().await?;
+    let data = reqwest::get(url).await?.error_for_status()?.json().await?;
 
     Ok(data)
 }
@@ -82,14 +92,8 @@ async fn get_game_data_by_id(token: &str, game_id: i32) -> Result<GameDataById> 
     Ok(data.game)
 }
 
-pub async fn on_index_command(
-    message: Message,
-    db: Arc<OknoId>,
-    bot: Bot
-) -> Result<()> {
-    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
-
-    if let Ok(url) = Url::parse(get_args(&message))
+async fn index(db: &OknoId, bot: &Bot, chat_id: ChatId, user_id: UserId, url: &str, cancel_button: bool) -> Result<bool> {
+    if let Ok(url) = Url::parse(url)
         && let Some(domain) = url.domain()
         && domain.ends_with("itch.io")
     {
@@ -97,61 +101,126 @@ pub async fn on_index_command(
             Ok(data) => data,
             Err(err) => {
                 error!("error get game data: {err:?}");
-                bot.send_message(message.chat.id, "Не удалось получить информацию о игре.")
-                    .await?;
-                return Ok(());
+
+                if let Some(req_err) = err.downcast_ref::<reqwest::Error>()
+                    && req_err.status() == Some(reqwest::StatusCode::NOT_FOUND)
+                {
+                    bot.send_message(chat_id, "Игра не найдена.")
+                        .await?;
+                } else {
+                    bot.send_message(chat_id, "Не удалось получить информацию о игре.")
+                        .await?;
+                }
+
+                return Ok(true);
             }
         };
 
-        let is_indexed =
-            check_game_index(data.id, data.title.as_str()).await?;
+        let is_indexed = check_game_index(data.id, data.title.as_str()).await?;
         if is_indexed {
-            bot.send_message(message.chat.id, "Игра уже проиндексирована!")
+            bot.send_message(chat_id, "Игра уже проиндексирована!")
                 .await?;
         } else {
-            let changed = db.add_index_sub(user.id, data.id).await?;
+            let changed = db.add_index_sub(user_id, data.id).await?;
             let msg = if changed {
                 "Когда игра будет проиндексирована вы получите уведомление."
             } else {
                 "Вы уже подписаны на индексацию этой игры."
             };
-            bot.send_message(message.chat.id, msg).await?;
+            bot.send_message(chat_id, msg).await?;
         }
 
-        Ok(())
+        Ok(true)
     } else {
-        bot.send_message(
-            message.chat.id,
-            "Аргументом должна быть ссылка на игру с itch.io, начинающаяся с https://",
-        )
-        .await?;
-        Ok(())
+        let mut send = bot.send_message(
+            chat_id,
+            "Вы должны указать ссылку на игру с itch.io, начинающаяся с https://",
+        );
+
+        if cancel_button {
+            send.reply_markup = Some(ReplyMarkup::inline_kb([[utils::cancel_button()]]))
+        }
+
+        send.await?;
+        Ok(false)
     }
 }
 
+pub async fn on_index_url_message(bot: Bot, db: Arc<OknoId>, session: Session, message: Message) -> Result<()> {
+    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
+
+    let finished = index(&db, &bot, message.chat.id, user.id, message.text().unwrap_or(""), true).await?;
+
+    if finished {
+        session.reset().await?;
+    }
+
+    Ok(())
+}
+
+async fn start_index_dialogue(bot: &Bot, chat_id: ChatId, session: &Session) -> Result<()> {
+    session.update(SessionState::WaitIndexUrl).await?;
+    bot.send_message(chat_id, "Введите ссылку на игру с itch.io")
+        .reply_markup(InlineKeyboardMarkup::new([[cancel_button()]]))
+        .await?;
+    Ok(())
+}
+
+pub async fn on_index_command(
+    message: Message,
+    db: Arc<OknoId>,
+    bot: Bot,
+    session: Session,
+) -> Result<()> {
+    let user = message.from.as_ref().ok_or(UtilError::FailedGetUser)?;
+
+    let url = get_args(&message);
+    if url.is_empty() {
+        start_index_dialogue(&bot, message.chat.id, &session).await?;
+    } else {
+        index(&db, &bot, message.chat.id, user.id, url, false).await?;
+    }
+
+    Ok(())
+}
+
+pub async fn on_index_callback(
+    bot: Bot,
+    callback: CallbackQuery,
+    session: Session,
+) -> Result<()> {
+    let chat_id = callback.chat_id().ok_or(UtilError::FailedGetChat)?;
+    start_index_dialogue(&bot, chat_id, &session).await?;
+    bot.answer_callback_query(callback.id).await?;
+
+    Ok(())
+}
+
 async fn check_games(bot: &Bot, db: &OknoId, itch_token: &str) -> Result<()> {
-    let notify_user = async |user_id, url: &Url| -> Result<()> {
-        let msg = format!("Игры была проиндексирована: {}", url);
-        bot.send_message(user_id, msg).await?;
+    let notify_user = async |user_id, url: &Url, title: &str| -> Result<()> {
+        let msg = format!("Игра <b>{title}</b> была проиндексирована: {}", url);
+        bot.send_message(user_id, msg)
+            .parse_mode(ParseMode::Html)
+            .await?;
         Ok(())
     };
 
     info!("start games index check");
 
     let subs = db.get_all_index_subs().await?;
-    let mut indexed_games = BTreeMap::new();
+    let mut indexed_games: BTreeMap<_, (Url, String)> = BTreeMap::new();
 
     for (user_id, game_id) in subs {
-        if let Some(url) = indexed_games.get(&game_id) {
-            notify_user(user_id, url).await?;
+        if let Some((url, title)) = indexed_games.get(&game_id) {
+            notify_user(user_id, url, title.as_str()).await?;
         } else {
-            let data = get_game_data_by_id(itch_token, game_id).await?;
-            let is_indexed = check_game_index(game_id, data.title.as_str()).await?;
+            let GameDataById { title, url } = get_game_data_by_id(itch_token, game_id).await?;
+            let is_indexed = check_game_index(game_id, title.as_str()).await?;
 
             if is_indexed {
                 info!("game indexed: {game_id}");
-                notify_user(user_id, &data.url).await?;
-                indexed_games.insert(game_id, data.url);
+                notify_user(user_id, &url, title.as_str()).await?;
+                indexed_games.insert(game_id, (url, title));
                 db.remove_index_subs(game_id).await?;
             }
         }

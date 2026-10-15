@@ -12,6 +12,7 @@ pub enum SessionState {
     WaitUnitReport {
         drop_id: DropId,
     },
+    WaitIndexUrl
 }
 
 pub type Session = Dialogue<SessionState, InMemStorage<SessionState>>;
