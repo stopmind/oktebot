@@ -1,5 +1,8 @@
 use crate::{
-    bot::{args::Mention, scheme::MENU_CALLBACK},
+    bot::{
+        args::Mention,
+        scheme::{CANCEL_CALLBACK, MENU_CALLBACK},
+    },
     oknoid::{IdError, Names, OknoId},
 };
 use std::{borrow::Cow, fmt::Write, ops::Not};
@@ -9,7 +12,6 @@ use teloxide::{
     types::{CallbackQuery, Chat, ChatId, ChatKind, InlineKeyboardButton, Recipient, User, UserId},
 };
 use thiserror::Error;
-use crate::bot::scheme::CANCEL_CALLBACK;
 
 pub const USER_BANNED: &str = "Вы забанены";
 

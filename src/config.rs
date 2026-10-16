@@ -22,6 +22,7 @@ pub struct Banners {
     pub unit: Url,
     pub support: Url,
     pub top: Url,
+    pub index: Url,
 }
 
 #[derive(Deserialize)]

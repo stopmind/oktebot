@@ -1,6 +1,9 @@
 use crate::{
     bot::{
-        scheme::{HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK, UNIT_INFO_CALLBACK},
+        scheme::{
+            HELP_CALLBACK, INDEX_HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK,
+            TOP_CALLBACK, UNIT_INFO_CALLBACK,
+        },
         session::Session,
         utils::{UtilError, check_private, get_callback_chat, menu_button, try_delete_origin},
     },
@@ -14,7 +17,6 @@ use teloxide::{
     prelude::*,
     types::{BotCommand, Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode},
 };
-use crate::bot::scheme::INDEX_CALLBACK;
 
 mod args;
 mod command;
@@ -170,8 +172,11 @@ pub async fn main_menu(bot: &Bot, config: &Config, chat: &Chat) -> anyhow::Resul
                 InlineKeyboardButton::url("t.me/oknogmdv", "https://t.me/oknogmdv".parse()?),
                 InlineKeyboardButton::url("oknoweb.ru", "https://oknoweb.ru".parse()?),
             ],
+            vec![InlineKeyboardButton::callback(
+                "Index Check",
+                INDEX_HELP_CALLBACK,
+            )],
             vec![InlineKeyboardButton::callback("Мой профиль", ME_CALLBACK)],
-            vec![InlineKeyboardButton::callback("Индекс", INDEX_CALLBACK)],
         ]))
         .parse_mode(ParseMode::Html)
         .await?;

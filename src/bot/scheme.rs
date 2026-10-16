@@ -1,6 +1,6 @@
 use crate::bot::{
     command::Command,
-    index::on_index_command,
+    index::{on_index_callback, on_index_command, on_index_help_callback, on_index_url_message},
     oknounit::{
         on_drop_command, on_drops_history_callback, on_unit_accept_report_callback,
         on_unit_info_callback, on_unit_info_command, on_unit_join_callback,
@@ -23,7 +23,6 @@ use teloxide::{
     filter_command,
     prelude::*,
 };
-use crate::bot::index::{on_index_callback, on_index_url_message};
 
 pub const CANCEL_CALLBACK: &str = "cancel";
 pub const HELP_CALLBACK: &str = "help";
@@ -42,6 +41,7 @@ pub const UNIT_INFO_CALLBACK: &str = "unit-info";
 pub const TOP_CALLBACK_PREFIX: &str = "top";
 pub const TOP_CALLBACK: &str = "top0";
 pub const INDEX_CALLBACK: &str = "index";
+pub const INDEX_HELP_CALLBACK: &str = "index-help";
 
 pub fn scheme() -> UpdateHandler<anyhow::Error> {
     dialogue::enter::<Update, InMemStorage<SessionState>, SessionState, _>()
@@ -129,9 +129,10 @@ pub fn scheme() -> UpdateHandler<anyhow::Error> {
                     filter(utils::callback_prefix_filter(TOP_CALLBACK_PREFIX))
                         .endpoint(on_top_callback),
                 )
+                .branch(filter(utils::callback_filter(INDEX_CALLBACK)).endpoint(on_index_callback))
                 .branch(
-                    filter(utils::callback_filter(INDEX_CALLBACK))
-                        .endpoint(on_index_callback),
+                    filter(utils::callback_filter(INDEX_HELP_CALLBACK))
+                        .endpoint(on_index_help_callback),
                 ),
         )
 }

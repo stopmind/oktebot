@@ -6,7 +6,7 @@ mod config;
 mod oknoid;
 
 use crate::{
-    bot::{index, set_commands},
+    bot::{index, index::Limiter, set_commands},
     config::Config,
     oknoid::OknoId,
 };
@@ -51,11 +51,16 @@ async fn start() -> anyhow::Result<()> {
         index::check_games_index_worker(bot, config, db)
     });
 
+    let limiter = Arc::new(Limiter::default());
+
+    tokio::spawn(limiter.clone().worker());
+
     Dispatcher::builder(bot, scheme())
         .dependencies(dptree::deps![
             InMemStorage::<SessionState>::new(),
             config,
-            db
+            db,
+            limiter
         ])
         .enable_ctrlc_handler()
         .build()
