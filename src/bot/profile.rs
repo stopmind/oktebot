@@ -21,7 +21,6 @@ use teloxide::{
 };
 use crate::oknoid::{Names, UserInfo};
 
-#[allow(unreachable_code, unused_variables)]
 async fn check_registration_inner(db: &OknoId, user: Option<&User>) -> UtilResult<()> {
     let (id, names): (_, Names) = todo!();
 
@@ -303,7 +302,7 @@ async fn top(
         .flatten(),
     );
 
-    bot.send_photo(chat_id, InputFile::file_id(config.banners.top.clone()))
+    bot.send_photo(chat_id, InputFile::url(config.banners.top.clone()))
         .caption(text)
         .parse_mode(ParseMode::Html)
         .reply_markup(markup)

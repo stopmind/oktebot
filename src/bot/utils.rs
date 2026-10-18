@@ -1,5 +1,8 @@
 use crate::{
-    bot::{args::Mention, scheme::MENU_CALLBACK},
+    bot::{
+        args::Mention,
+        scheme::{CANCEL_CALLBACK, MENU_CALLBACK},
+    },
     oknoid::{IdError, OknoId},
 };
 use std::{fmt::Write, ops::Not};
@@ -12,6 +15,10 @@ use thiserror::Error;
 
 pub fn menu_button() -> InlineKeyboardButton {
     InlineKeyboardButton::callback("В меню", MENU_CALLBACK)
+}
+
+pub fn cancel_button() -> InlineKeyboardButton {
+    InlineKeyboardButton::callback("Отмена", CANCEL_CALLBACK)
 }
 
 #[derive(Error, Debug)]

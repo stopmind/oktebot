@@ -1,5 +1,6 @@
 use crate::{bot::{
     oknounit::*,
+    index::{on_index_callback, on_index_command, on_index_help_callback, on_index_url_message},
     on_cancel_callback, on_help_callback, on_help_command, on_main_menu_callback,
     on_main_menu_command,
     profile::*,
@@ -16,13 +17,16 @@ pub const SUPPORT_SELECTED_CALLBACK_PREFIX: &str = "support-selected";
 pub const UNIT_JOIN_CALLBACK: &str = "unit-join";
 pub const UNIT_REPORT_CALLBACK_PREFIX: &str = "unit-feedback";
 pub const UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX: &str = "unit-accept";
-pub const DROPS_HISTORY_CALLBACK: &str = "drops-history";
+pub const DROPS_HISTORY_CALLBACK: &str = "drops-history:0";
+pub const DROPS_HISTORY_CALLBACK_PREFIX: &str = "drops-history";
 pub const MENU_CALLBACK: &str = "menu";
 pub const SUPPORT_CALLBACK: &str = "support";
 pub const ME_CALLBACK: &str = "me";
 pub const UNIT_INFO_CALLBACK: &str = "unit-info";
 pub const TOP_CALLBACK_PREFIX: &str = "top";
 pub const TOP_CALLBACK: &str = "top:0";
+pub const INDEX_CALLBACK: &str = "index";
+pub const INDEX_HELP_CALLBACK: &str = "index-help";
 
 #[rustfmt::skip]
 pub fn scheme() -> Router {
@@ -32,7 +36,8 @@ pub fn scheme() -> Router {
         .state(states!{
             SessionState::WaitUnitReport { drop_id } => on_unit_report_message([user], drop_id),
             SessionState::WaitBioMessage => on_bio_message([user]),
-            SessionState::WaitSupportMessage { category } => on_support_message([user], category)
+            SessionState::WaitSupportMessage { category } => on_support_message([user], category),
+            SessionState::WaitIndexUrl => on_index_url_message([user])
         })
         .command("menu", w!(on_main_menu_command), HandlerOptions::empty()
             .only_private(true))
@@ -59,6 +64,7 @@ pub fn scheme() -> Router {
             .required_privilege(PrivilegeLevel::Admin))
         .command("unban", w!(on_unban_command), HandlerOptions::empty()
             .required_privilege(PrivilegeLevel::Admin))
+        .command("index", w!(on_index_command), HandlerOptions::empty())
 
         .callback(CANCEL_CALLBACK, w!(on_cancel_callback), HandlerOptions::empty())
         .callback(HELP_CALLBACK, w!(on_help_callback), HandlerOptions::empty())
@@ -76,7 +82,7 @@ pub fn scheme() -> Router {
             .check_blacklist(true)
             .remove_old_message(true))
         .callback(UNIT_JOIN_CALLBACK, w!(on_unit_join_callback), HandlerOptions::empty())
-        .callback(DROPS_HISTORY_CALLBACK, w!(on_drops_history_callback), HandlerOptions::empty()
+        .callback(DROPS_HISTORY_CALLBACK_PREFIX, w!(on_drops_history_callback), HandlerOptions::empty()
             .remove_old_message(true))
         .callback(PROFILE_CALLBACK_PREFIX, w!(on_profile_callback), HandlerOptions::empty())
         .callback(SUPPORT_SELECTED_CALLBACK_PREFIX, w!(on_support_selected_callback), HandlerOptions::empty()
@@ -88,6 +94,10 @@ pub fn scheme() -> Router {
         .callback(UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, w!(on_unit_accept_report_callback), HandlerOptions::empty()
             .required_privilege(PrivilegeLevel::Admin))
         .callback(TOP_CALLBACK_PREFIX, w!(on_top_callback), HandlerOptions::empty()
+            .remove_old_message(true))
+        .callback(INDEX_CALLBACK, w!(on_index_callback), HandlerOptions::empty()
+            .remove_old_message(true))
+        .callback(INDEX_HELP_CALLBACK, w!(on_index_help_callback), HandlerOptions::empty()
             .remove_old_message(true));
 
     router

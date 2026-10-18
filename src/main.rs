@@ -3,7 +3,7 @@ mod config;
 mod oknoid;
 
 use crate::{
-    bot::{scheme::scheme, session::Sessions, set_commands, BotContext},
+    bot::{index, index::Limiter, scheme::scheme, session::Sessions, set_commands, BotContext},
     config::Config,
     oknoid::OknoId,
 };
@@ -28,10 +28,28 @@ async fn start() -> anyhow::Result<()> {
             .map_err(|e| anyhow!("failed to create storage directory: {}", e))?;
     }
 
-    let db = OknoId::open(config.clone()).await?;
+    let db = Arc::new(OknoId::open(config.clone()).await?);
     let bot = Bot::new(config.token.clone());
 
-    set_commands(&bot).await?;
+    tokio::spawn({
+        let bot = bot.clone();
+        async move {
+            if let Err(err) = set_commands(&bot).await {
+                error!("{}", err);
+            }
+        }
+    });
+
+    tokio::spawn({
+        let bot = bot.clone();
+        let config = config.clone();
+        let db = db.clone();
+        index::check_games_index_worker(bot, config, db)
+    });
+
+    let limiter = Arc::new(Limiter::default());
+
+    tokio::spawn(limiter.clone().worker());
 
     let me = bot.get_me().await?;
 
@@ -43,8 +61,10 @@ async fn start() -> anyhow::Result<()> {
             db,
             me,
             sessions: Sessions::default(),
+            limiter
         }))
         .await;
+
     Ok(())
 }
 

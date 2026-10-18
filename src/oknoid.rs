@@ -473,9 +473,10 @@ impl OknoId {
             .try_collect()
             .await
     }
-    pub async fn get_latest_drops(&self, limit: u32) -> IdResult<Vec<DropInfo>> {
-        sqlx::query_as("SELECT id, link, description FROM drops ORDER BY id DESC LIMIT ?")
+    pub async fn get_latest_drops(&self, offset: u32, limit: u32) -> IdResult<Vec<DropInfo>> {
+        sqlx::query_as("SELECT id, link, description FROM drops ORDER BY id DESC LIMIT ? OFFSET ?")
             .bind(limit)
+            .bind(offset)
             .fetch_all(&self.pool)
             .await
             .map_err(IdError::from)
@@ -566,5 +567,44 @@ impl OknoId {
             .get_ids_by_first_name(first_name)
             .map(Vec::from_iter)
             .unwrap_or_default()
+    }
+
+    pub async fn get_drops_count(&self) -> IdResult<u32> {
+        sqlx::query_as("SELECT COUNT(*) FROM drops")
+            .fetch_one(&self.pool)
+            .await
+            .map(|(count,)| count)
+            .map_err(IdError::from)
+    }
+
+    /// return true if user wasn't subscribed to this game
+    pub async fn add_index_sub(&self, user: UserId, game_id: i32) -> IdResult<bool> {
+        sqlx::query("INSERT OR IGNORE INTO itch_index_subs (user_id, game_id) VALUES (?, ?)")
+            .bind(user.0 as i64)
+            .bind(game_id)
+            .execute(&self.pool)
+            .await
+            .map(|res| res.rows_affected() == 1)
+            .map_err(IdError::from)
+    }
+
+    pub async fn remove_index_subs(&self, game_id: i32) -> IdResult<()> {
+        sqlx::query("DELETE FROM itch_index_subs WHERE game_id = ?")
+            .bind(game_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_all_index_subs(&self) -> IdResult<Vec<(UserId, i32)>> {
+        sqlx::query_as("SELECT user_id, game_id FROM itch_index_subs")
+            .fetch(&self.pool)
+            .map(|res| {
+                let res: (i64, i32) = res?;
+                Ok((UserId(res.0 as u64), res.1))
+            })
+            .try_collect()
+            .await
     }
 }

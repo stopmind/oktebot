@@ -13,6 +13,7 @@ pub enum SessionState {
     WaitUnitReport {
         drop_id: DropId,
     },
+    WaitIndexUrl,
 }
 
 struct SessionEntry {

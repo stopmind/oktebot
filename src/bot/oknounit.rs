@@ -1,3 +1,4 @@
+use crate::bot::scheme::DROPS_HISTORY_CALLBACK_PREFIX;
 use crate::{bot::{
     args::get_args,
     invalid_usage_message,
@@ -35,7 +36,7 @@ async fn unit_info(
     from_menu: bool,
 ) -> anyhow::Result<()> {
     if db.check_role(user_id, Role::OknoUnit).await? {
-        let drops = db.get_latest_drops(3).await?;
+        let drops = db.get_latest_drops(0, 3).await?;
 
         let mut drop_completeness = Vec::with_capacity(drops.len());
         for drop in &drops {
@@ -81,12 +82,12 @@ async fn unit_info(
                 .chain(iter::once([menu_button()])),
         );
 
-        bot.send_photo(chat_id, InputFile::file_id(config.banners.unit.clone()))
+        bot.send_photo(chat_id, InputFile::url(config.banners.unit.clone()))
             .caption(text)
             .reply_markup(markup)
             .await?;
     } else {
-        bot.send_photo(chat_id,  InputFile::file_id(config.banners.unit.clone()))
+        bot.send_photo(chat_id,  InputFile::url(config.banners.unit.clone()))
             .caption("\
                 <b>OknoUnit</b> - Это статус <b>боевой единицы</b> нашего сообщества. Задача каждого OknoUnit`а - <b>проявлять активность на дропах.</b>\n\
                 \n\
@@ -351,17 +352,24 @@ pub async fn on_drop_command(
 pub async fn on_drops_history_callback(
     ctx: &BotContext,
     info: &CallbackInfo,
-    _: (),
+    (page,): (u32,),
 ) -> anyhow::Result<()> {
     let chat_id = info.message.chat().id;
-    let drops = ctx.db.get_latest_drops(20).await?;
+
+    const PAGE_SIZE: u32 = 20;
+
+    let pages_count = ctx.db.get_drops_count().await?.div_ceil(PAGE_SIZE);
+    let drops = ctx.db.get_latest_drops(page * PAGE_SIZE, PAGE_SIZE).await?;
 
     let mut drop_completeness = Vec::with_capacity(drops.len());
     for drop in &drops {
         drop_completeness.push(ctx.db.check_drop_completed(drop.id, info.from.id).await?);
     }
 
-    let mut text = "Используйте /feedback &lt;id&gt; для подачи заявки:\n".to_string();
+    let mut text = format!(
+        "Страница ({}/{pages_count}). Используйте /feedback &lt;id&gt; для подачи заявки:\n",
+        page + 1
+    );
     for (i, drop) in drops.iter().enumerate() {
         writeln!(
             &mut text,
@@ -379,14 +387,34 @@ pub async fn on_drops_history_callback(
         }
     }
 
-    ctx.bot
-        .send_photo(chat_id, InputFile::file_id(ctx.config.banners.unit.clone()))
+    let markup = InlineKeyboardMarkup::new(
+        [
+            Some([InlineKeyboardButton::callback(
+                "Назад",
+                UNIT_INFO_CALLBACK.to_owned(),
+            )]),
+            (page > 0).then(|| {
+                [InlineKeyboardButton::callback(
+                    "< Предыдущая страница",
+                    format!("{DROPS_HISTORY_CALLBACK_PREFIX}{}", page - 1),
+                )]
+            }),
+            (page + 1 < pages_count).then(|| {
+                [InlineKeyboardButton::callback(
+                    "Следующая страница >",
+                    format!("{DROPS_HISTORY_CALLBACK_PREFIX}{}", page + 1),
+                )]
+            }),
+            Some([menu_button()]),
+        ]
+        .into_iter()
+        .flatten(),
+    );
+
+    ctx.bot.send_photo(chat_id, InputFile::url(ctx.config.banners.unit.clone()))
         .caption(text)
         .parse_mode(ParseMode::Html)
-        .reply_markup(InlineKeyboardMarkup::new([[
-            InlineKeyboardButton::callback("Назад", UNIT_INFO_CALLBACK.to_owned()),
-            menu_button(),
-        ]]))
+        .reply_markup(markup)
         .await?;
     Ok(())
 }

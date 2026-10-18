@@ -35,7 +35,7 @@ def update():
                         download(asset["browser_download_url"], "/usr/local/bin/oktebot")
                         os.chmod("/usr/local/bin/oktebot", 0o777)
 
-                save.truncate()
+                save.truncate(0)
                 save.write(latest_tag)
             except Exception as e:
                 print(f"Failed to download release: {e}")

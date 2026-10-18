@@ -4,8 +4,9 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
-use teloxide::types::{ChatId, FileId, UserId};
+use teloxide::types::{ChatId, UserId};
 use thiserror::Error;
+use url::Url;
 
 #[derive(Error, Debug)]
 pub enum ConfigLoadError {
@@ -17,16 +18,18 @@ pub enum ConfigLoadError {
 
 #[derive(Deserialize)]
 pub struct Banners {
-    pub main: FileId,
-    pub unit: FileId,
-    pub support: FileId,
-    pub top: FileId,
+    pub main: Url,
+    pub unit: Url,
+    pub support: Url,
+    pub top: Url,
+    pub index: Url,
 }
 
 #[derive(Deserialize)]
 pub struct Config {
     pub token: String,
     pub support_chat: ChatId,
+    pub itch_token: String,
     pub banners: Banners,
     #[serde(default)]
     pub super_admins: BTreeSet<UserId>,

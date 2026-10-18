@@ -1,7 +1,7 @@
 use crate::{
     bot::{
         router::{CallbackInfo, CommandInfo},
-        scheme::{HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK, UNIT_INFO_CALLBACK},
+        scheme::{HELP_CALLBACK, INDEX_HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK, UNIT_INFO_CALLBACK},
         session::{SessionState, Sessions},
         utils::menu_button,
     },
@@ -16,8 +16,10 @@ use teloxide::{
     },
     RequestError,
 };
+use crate::bot::index::Limiter;
 
 mod args;
+pub mod index;
 mod oknounit;
 pub mod profile;
 mod router;
@@ -29,9 +31,10 @@ pub mod utils;
 pub struct BotContext {
     pub bot: Bot,
     pub config: Arc<Config>,
-    pub db: OknoId,
+    pub db: Arc<OknoId>,
     pub me: Me,
     pub sessions: Sessions,
+    pub limiter: Arc<Limiter>
 }
 
 pub async fn invalid_usage_message(bot: &Bot, chat_id: ChatId) -> Result<(), RequestError> {
@@ -84,6 +87,7 @@ pub async fn send_help_message(
         /top - топ пользователей по репутации.\n\
         /unit - информация о OKNO Unit.\n\
         /feedback <code>&lt;drop id&gt;</code> - оставить фидбек по id дропа.\n\
+        /index <code>&lt;ссылка на игру с itch.io&gt;</code> - подписатся на индесирование игры с itch.io.\n\
     "
     .to_owned();
 
@@ -137,6 +141,7 @@ pub async fn set_commands(bot: &Bot) -> anyhow::Result<()> {
         BotCommand::new("bio", "установить описание профиля"),
         BotCommand::new("top", "топ пользователей по репутации"),
         BotCommand::new("unit", "информация о OknoUnit"),
+        BotCommand::new("index", "проверить индексацию игры"),
     ])
     .await?;
 
@@ -149,7 +154,7 @@ pub async fn main_menu(bot: &Bot, config: &Config, chat: &Chat) -> anyhow::Resul
         \n\
         <i>С чем я могу вам помочь?</i>";
 
-    bot.send_photo(chat.id, InputFile::file_id(config.banners.main.clone()))
+    bot.send_photo(chat.id, InputFile::url(config.banners.main.clone()))
         .caption(text)
         .reply_markup(InlineKeyboardMarkup::new([
             vec![InlineKeyboardButton::callback(
@@ -164,6 +169,10 @@ pub async fn main_menu(bot: &Bot, config: &Config, chat: &Chat) -> anyhow::Resul
                 InlineKeyboardButton::url("t.me/oknogmdv", "https://t.me/oknogmdv".parse()?),
                 InlineKeyboardButton::url("oknoweb.ru", "https://oknoweb.ru".parse()?),
             ],
+            vec![InlineKeyboardButton::callback(
+                "Index Check",
+                INDEX_HELP_CALLBACK,
+            )],
             vec![InlineKeyboardButton::callback("Мой профиль", ME_CALLBACK)],
         ]))
         .parse_mode(ParseMode::Html)
