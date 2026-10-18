@@ -9,7 +9,7 @@ use crate::{
 };
 use anyhow::bail;
 use futures::{FutureExt, StreamExt, future::BoxFuture};
-use log::{error, warn};
+use log::{error, info, warn};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use teloxide::{
     Bot,
@@ -21,6 +21,7 @@ use teloxide::{
     update_listeners,
     update_listeners::AsUpdateStream,
 };
+use crate::bot::scheme::{DROPS_HISTORY_CALLBACK_PREFIX, PROFILE_CALLBACK_PREFIX, SUPPORT_SELECTED_CALLBACK_PREFIX, TOP_CALLBACK_PREFIX, UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, UNIT_REPORT_CALLBACK_PREFIX};
 
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub enum PrivilegeLevel {
@@ -142,6 +143,8 @@ struct CallbackHandler {
         dyn for<'fut> Fn(
                 &'fut BotContext,
                 &'fut CallbackInfo,
+                &'fut str,
+                bool,
             ) -> Option<BoxFuture<'fut, anyhow::Result<()>>>
             + Send
             + Sync,
@@ -165,8 +168,8 @@ impl CallbackHandler {
     {
         Self {
             opts,
-            func: Box::new(move |ctx, info| {
-                let mut state = CallbackParsingState::new(info.data.as_str());
+            func: Box::new(move |ctx, info, args, old_deli| {
+                let mut state = CallbackParsingState::new(args, old_deli);
                 HandlerArgs::parse_from_state(&mut state).map(|args| f(ctx, info, args))
             }),
         }
@@ -339,36 +342,47 @@ impl Router {
 
         ctx.bot.answer_callback_query(id).await?;
 
-        let callback_name = match data.find(':') {
-            None => data.as_str(),
-            Some(pos) => &data[..pos],
+        let info = CallbackInfo {
+            data,
+            message,
+            from,
         };
 
-        let Some(handler) = self.callbacks_actions.get(callback_name) else {
+        let (callback_name, mut args) = match info.data.find(':') {
+            None => (info.data.as_str(), ""),
+            Some(pos) => (&info.data[..pos], &info.data[pos+1..]),
+        };
+
+        let mut old_deli = false;
+
+        let handler = self.callbacks_actions.get(callback_name)
+            .or_else(|| {
+                let (name, new_args) = try_parse_old(info.data.as_str());
+                args = new_args;
+                old_deli = true;
+                info!("callback {} parsed as {name}:{args}", info.data);
+                self.callbacks_actions.get(name)
+            });
+        let Some(handler) = handler else {
             bail!("unknown callback: {}", callback_name);
         };
 
         let allowed = handler
             .opts
-            .check(&ctx.bot, &ctx.db, message.chat(), from.id)
+            .check(&ctx.bot, &ctx.db, info.message.chat(), info.from.id)
             .await?;
 
         if allowed {
             if handler.opts.remove_old_message
                 && let Err(err) = ctx
                     .bot
-                    .delete_message(message.chat().id, message.id())
+                    .delete_message(info.message.chat().id, info.message.id())
                     .await
             {
                 warn!("Failed to delete old message: {}", err);
             }
 
-            let info = CallbackInfo {
-                data,
-                message,
-                from,
-            };
-            if let Some(future) = (handler.func)(ctx, &info) {
+            if let Some(future) = (handler.func)(ctx, &info, args, old_deli) {
                 future.await?;
             }
         }
@@ -410,6 +424,25 @@ impl Router {
             }
         }
     }
+}
+
+fn try_parse_old(old: &str) -> (&str, &str) {
+    const PREFIXES: &[&str] = &[
+        PROFILE_CALLBACK_PREFIX,
+        SUPPORT_SELECTED_CALLBACK_PREFIX,
+        UNIT_REPORT_CALLBACK_PREFIX,
+        UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX,
+        DROPS_HISTORY_CALLBACK_PREFIX,
+        TOP_CALLBACK_PREFIX
+    ];
+
+    for prefix in PREFIXES {
+        if let Some(args) = old.strip_prefix(prefix) {
+            return (prefix, args);
+        }
+    }
+
+    ("unknown", "---")
 }
 
 #[macro_export]

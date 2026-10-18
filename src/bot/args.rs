@@ -57,19 +57,20 @@ impl ParsingState for CommandParsingState<'_> {
 
 pub struct CallbackParsingState<'s> {
     args: &'s str,
+    old_deli: bool,
 }
 
 impl<'s> CallbackParsingState<'s> {
-    pub fn new(data: &'s str) -> Self {
-        let args = data.find(':').map(|i| &data[i + 1..]).unwrap_or("");
-        CallbackParsingState { args }
+    pub fn new(args: &'s str, old_deli: bool) -> Self {
+        CallbackParsingState { args, old_deli }
     }
 }
 
 impl ParsingState for CallbackParsingState<'_> {
     fn parse<T: FromStr>(&mut self) -> Option<T> {
         let current;
-        (current, self.args) = self.args.split_once(':').unwrap_or((self.args, ""));
+        let deli = if self.old_deli { '-' } else { ':' } ;
+        (current, self.args) = self.args.split_once(deli).unwrap_or((self.args, ""));
 
         current.parse().ok()
     }
