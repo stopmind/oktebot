@@ -1,38 +1,37 @@
-use crate::{bot::{
-    args::Mention,
-    router::{CallbackInfo, CommandInfo},
-    scheme::{BIO_CALLBACK, CANCEL_CALLBACK, MENU_CALLBACK, TOP_CALLBACK_PREFIX},
-    session::{SessionState, Sessions},
-    utils::{
-        get_exactly_one_user, menu_button, UtilResult,
+use crate::{
+    bot::{
+        BotContext,
+        args::Mention,
+        router::{CallbackInfo, CommandInfo},
+        scheme::{BIO_CALLBACK, CANCEL_CALLBACK, MENU_CALLBACK, TOP_CALLBACK_PREFIX},
+        session::{SessionState, Sessions},
+        utils::{UtilResult, get_exactly_one_user, menu_button},
     },
-    BotContext,
-}, config::Config, fmt_callback, oknoid::{OknoId, Role}};
-use log::error;
-use std::{fmt::Write, iter, sync::Arc};
+    config::Config,
+    fmt_callback,
+    oknoid::{OknoId, Role, UserInfo},
+};
+use std::{fmt::Write, iter};
 use teloxide::{
+    Bot,
     payloads::{SendMessageSetters, SendPhotoSetters},
     prelude::{ChatId, Message, Requester, UserId},
     types::{
-        Chat, ChatKind, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup,
-        InputFile, ParseMode, User,
+        Chat, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, InputFile,
+        ParseMode, User,
     },
-    Bot,
 };
-use crate::oknoid::{Names, UserInfo};
 
-async fn check_registration_inner(db: &OknoId, user: Option<&User>) -> UtilResult<()> {
-    let (id, names): (_, Names) = todo!();
-
-    if db.check_user_exists(id) {
-        db.update_names(id, names.username.as_deref(), names.first_name.as_ref())
+pub async fn check_registration(db: &OknoId, user: &User) -> UtilResult {
+    if db.check_user_exists(user.id) {
+        db.update_names(user.id, user.username.as_deref(), user.first_name.as_str())
             .await?;
     } else {
         db.register_user(
-            id,
+            user.id,
             UserInfo {
-                username: names.username.map(|r| r.into_owned()),
-                first_name: names.first_name.into_owned(),
+                username: user.username.clone(),
+                first_name: user.first_name.clone(),
                 roles: Default::default(),
                 is_banned: false,
                 reputation: 0,
@@ -43,16 +42,6 @@ async fn check_registration_inner(db: &OknoId, user: Option<&User>) -> UtilResul
     }
 
     Ok(())
-}
-
-//TODO: add it
-pub async fn check_registration(db: Arc<OknoId>, message: Message) {
-    if !matches!(message.chat.kind, ChatKind::Private(..)) {
-        return;
-    }
-    if let Err(err) = check_registration_inner(db.as_ref(), message.from.as_ref()).await {
-        error!("Error checking registration: {}", err);
-    }
 }
 
 async fn bio(bot: &Bot, sessions: &Sessions, user_id: UserId, chat: &Chat) -> anyhow::Result<()> {
@@ -75,11 +64,7 @@ pub async fn on_bio_command(ctx: &BotContext, info: &CommandInfo, _args: ()) -> 
     Ok(())
 }
 
-pub async fn on_bio_callback(
-    ctx: &BotContext,
-    info: &CallbackInfo,
-    _: (),
-) -> anyhow::Result<()> {
+pub async fn on_bio_callback(ctx: &BotContext, info: &CallbackInfo, _: ()) -> anyhow::Result<()> {
     bio(&ctx.bot, &ctx.sessions, info.from.id, info.message.chat()).await?;
     Ok(())
 }
@@ -87,16 +72,18 @@ pub async fn on_bio_callback(
 pub async fn on_bio_message(
     ctx: &BotContext,
     message: &Message,
-    (user,): (&User,)
+    (user,): (&User,),
 ) -> anyhow::Result<()> {
     let Some(text) = message.text() else {
-        ctx.bot.send_message(message.chat.id, "Отправьте сообщение с текстом!")
+        ctx.bot
+            .send_message(message.chat.id, "Отправьте сообщение с текстом!")
             .await?;
         return Ok(());
     };
 
     if text.trim().is_empty() {
-        ctx.bot.send_message(message.chat.id, "Описание не может быть пустым! >:(")
+        ctx.bot
+            .send_message(message.chat.id, "Описание не может быть пустым! >:(")
             .await?;
         return Ok(());
     }
@@ -105,12 +92,14 @@ pub async fn on_bio_message(
 
     let result = ctx.db.set_bio(user.id, Some(text)).await;
     if let Err(error) = result {
-        ctx.bot.send_message(message.chat.id, "Не удалось изменить описание.")
+        ctx.bot
+            .send_message(message.chat.id, "Не удалось изменить описание.")
             .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
             .await?;
         Err(error.into())
     } else {
-        ctx.bot.send_message(message.chat.id, "Описание профиля обновлено.")
+        ctx.bot
+            .send_message(message.chat.id, "Описание профиля обновлено.")
             .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
             .await?;
         Ok(())
@@ -287,13 +276,13 @@ async fn top(
             (page > 0).then(|| {
                 [InlineKeyboardButton::callback(
                     "< Предыдущая страница",
-                    fmt_callback![TOP_CALLBACK_PREFIX, page - 1]
+                    fmt_callback![TOP_CALLBACK_PREFIX, page - 1],
                 )]
             }),
             (page + 1 < pages_count).then(|| {
                 [InlineKeyboardButton::callback(
                     "Следующая страница >",
-                    fmt_callback![TOP_CALLBACK_PREFIX, page + 1]
+                    fmt_callback![TOP_CALLBACK_PREFIX, page + 1],
                 )]
             }),
             Some([menu_button()]),

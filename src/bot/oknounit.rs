@@ -1,31 +1,34 @@
-use crate::bot::scheme::DROPS_HISTORY_CALLBACK_PREFIX;
-use crate::{bot::{
-    args::get_args,
-    invalid_usage_message,
-    router::{CallbackInfo, CommandInfo},
-    scheme::{
-        CANCEL_CALLBACK, DROPS_HISTORY_CALLBACK, MENU_CALLBACK, PROFILE_CALLBACK_PREFIX,
-        UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, UNIT_INFO_CALLBACK, UNIT_JOIN_CALLBACK,
-        UNIT_REPORT_CALLBACK_PREFIX,
+use crate::{
+    bot::{
+        BotContext,
+        args::get_args,
+        invalid_usage_message,
+        router::{CallbackInfo, CommandInfo},
+        scheme::{
+            CANCEL_CALLBACK, DROPS_HISTORY_CALLBACK, DROPS_HISTORY_CALLBACK_PREFIX, MENU_CALLBACK,
+            PROFILE_CALLBACK_PREFIX, UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, UNIT_INFO_CALLBACK,
+            UNIT_JOIN_CALLBACK, UNIT_REPORT_CALLBACK_PREFIX,
+        },
+        session::{SessionState, Sessions},
+        support,
+        support::SupportCategory,
+        utils::{UtilError, menu_button},
     },
-    session::{SessionState, Sessions},
-    support,
-    support::SupportCategory,
-    utils::{menu_button, UtilError},
-    BotContext,
-}, config::Config, fmt_callback, oknoid::{DropId, OknoId, Role}};
+    config::Config,
+    fmt_callback,
+    oknoid::{DropId, OknoId, Role},
+};
 use log::error;
 use std::{fmt::Write, iter};
 use teloxide::{
+    Bot,
     payloads::{EditMessageReplyMarkupSetters, SendMessageSetters, SendPhotoSetters},
     requests::{Request, Requester},
     types::{
-        ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile,
-        Message, ParseMode, UserId,
+        ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message, ParseMode, User,
+        UserId,
     },
-    Bot,
 };
-use teloxide::types::User;
 
 async fn unit_info(
     bot: &Bot,
@@ -69,7 +72,7 @@ async fn unit_info(
                 .map(|(i, drop)| {
                     [InlineKeyboardButton::callback(
                         format!("Я оставил фидбек для {}", i + 1),
-                        fmt_callback![UNIT_REPORT_CALLBACK_PREFIX, drop.id]
+                        fmt_callback![UNIT_REPORT_CALLBACK_PREFIX, drop.id],
                     )]
                 })
                 .chain(iter::once([support::choice_button(
@@ -206,51 +209,54 @@ pub async fn on_unit_accept_report_callback(
 pub async fn on_unit_report_message(
     ctx: &BotContext,
     message: &Message,
-    (user, drop_id,): (&User, DropId),
+    (user, drop_id): (&User, DropId),
 ) -> anyhow::Result<()> {
     let drop = ctx.db.get_drop(drop_id).await?;
 
-    ctx.bot.forward_message(ctx.config.support_chat, message.chat.id, message.id)
+    ctx.bot
+        .forward_message(ctx.config.support_chat, message.chat.id, message.id)
         .await?;
-    ctx.bot.send_message(
-        ctx.config.support_chat,
-        format!(
-            "Дроп: {}{}{}",
-            drop.link,
-            if drop.description.is_some() {
-                "\n> "
-            } else {
-                ""
-            },
-            drop.description.as_deref().unwrap_or("")
-        ),
-    )
-    .reply_markup(InlineKeyboardMarkup::new([
-        [InlineKeyboardButton::callback(
-            "Описание профиля",
-            fmt_callback![PROFILE_CALLBACK_PREFIX, user.id],
-        )],
-        [InlineKeyboardButton::callback(
-            "Подтвердить +1",
-            fmt_callback![UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, user.id, drop_id, 1],
-        )],
-        [InlineKeyboardButton::callback(
-            "Подтвердить +2",
-            fmt_callback![UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, user.id, drop_id, 2],
-        )],
-        [InlineKeyboardButton::callback(
-            "Подтвердить +3",
-            fmt_callback![UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, user.id, drop_id, 3],
-        )],
-    ]))
-    .await?;
+    ctx.bot
+        .send_message(
+            ctx.config.support_chat,
+            format!(
+                "Дроп: {}{}{}",
+                drop.link,
+                if drop.description.is_some() {
+                    "\n> "
+                } else {
+                    ""
+                },
+                drop.description.as_deref().unwrap_or("")
+            ),
+        )
+        .reply_markup(InlineKeyboardMarkup::new([
+            [InlineKeyboardButton::callback(
+                "Описание профиля",
+                fmt_callback![PROFILE_CALLBACK_PREFIX, user.id],
+            )],
+            [InlineKeyboardButton::callback(
+                "Подтвердить +1",
+                fmt_callback![UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, user.id, drop_id, 1],
+            )],
+            [InlineKeyboardButton::callback(
+                "Подтвердить +2",
+                fmt_callback![UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, user.id, drop_id, 2],
+            )],
+            [InlineKeyboardButton::callback(
+                "Подтвердить +3",
+                fmt_callback![UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, user.id, drop_id, 3],
+            )],
+        ]))
+        .await?;
 
-    ctx.bot.send_message(
-        message.chat.id,
-        "Заявка отправлена! Админы проверят вашу заявку и начислят вам репутацию",
-    )
-    .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
-    .await?;
+    ctx.bot
+        .send_message(
+            message.chat.id,
+            "Заявка отправлена! Админы проверят вашу заявку и начислят вам репутацию",
+        )
+        .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
+        .await?;
 
     Ok(())
 }
@@ -328,7 +334,7 @@ pub async fn on_drop_command(
     );
     let markup = InlineKeyboardMarkup::new([[InlineKeyboardButton::callback(
         "Я оставил фидбек",
-        fmt_callback![UNIT_REPORT_CALLBACK_PREFIX, drop_id]
+        fmt_callback![UNIT_REPORT_CALLBACK_PREFIX, drop_id],
     )]]);
 
     let mut request = ctx.bot.send_message(UserId(0), text).reply_markup(markup);
@@ -411,7 +417,8 @@ pub async fn on_drops_history_callback(
         .flatten(),
     );
 
-    ctx.bot.send_photo(chat_id, InputFile::url(ctx.config.banners.unit.clone()))
+    ctx.bot
+        .send_photo(chat_id, InputFile::url(ctx.config.banners.unit.clone()))
         .caption(text)
         .parse_mode(ParseMode::Html)
         .reply_markup(markup)

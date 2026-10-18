@@ -3,12 +3,12 @@ mod config;
 mod oknoid;
 
 use crate::{
-    bot::{index, index::Limiter, scheme::scheme, session::Sessions, set_commands, BotContext},
+    bot::{BotContext, index, index::Limiter, scheme::scheme, session::Sessions, set_commands},
     config::Config,
     oknoid::OknoId,
 };
 use anyhow::anyhow;
-use log::{error, info, LevelFilter};
+use log::{LevelFilter, error, info};
 use std::{env, fs, sync::Arc};
 use teloxide::prelude::*;
 
@@ -61,7 +61,7 @@ async fn start() -> anyhow::Result<()> {
             db,
             me,
             sessions: Sessions::default(),
-            limiter
+            limiter,
         }))
         .await;
 

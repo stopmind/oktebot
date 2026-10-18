@@ -7,9 +7,9 @@ use crate::{
 };
 use std::{fmt::Write, ops::Not};
 use teloxide::{
+    Bot,
     requests::Requester,
     types::{ChatId, InlineKeyboardButton, UserId},
-    Bot,
 };
 use thiserror::Error;
 
@@ -33,7 +33,7 @@ pub enum UtilError {
     UsageError,
 }
 
-pub type UtilResult<T> = Result<T, UtilError>;
+pub type UtilResult<T = ()> = Result<T, UtilError>;
 
 pub fn resolve_mention(db: &OknoId, mention: &Mention) -> UtilResult<Vec<UserId>> {
     let results = match mention {

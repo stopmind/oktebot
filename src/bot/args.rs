@@ -37,9 +37,7 @@ pub struct CommandParsingState<'s> {
 
 impl<'s> CommandParsingState<'s> {
     pub fn new(data: &'s str) -> Self {
-        let args = data.find(' ')
-            .map(|i| data[i..].trim_start())
-            .unwrap_or("");
+        let args = data.find(' ').map(|i| data[i..].trim_start()).unwrap_or("");
         CommandParsingState { args }
     }
 }
@@ -63,9 +61,7 @@ pub struct CallbackParsingState<'s> {
 
 impl<'s> CallbackParsingState<'s> {
     pub fn new(data: &'s str) -> Self {
-        let args = data.find(':')
-            .map(|i| &data[i+1..])
-            .unwrap_or("");
+        let args = data.find(':').map(|i| &data[i + 1..]).unwrap_or("");
         CallbackParsingState { args }
     }
 }
@@ -73,10 +69,7 @@ impl<'s> CallbackParsingState<'s> {
 impl ParsingState for CallbackParsingState<'_> {
     fn parse<T: FromStr>(&mut self) -> Option<T> {
         let current;
-        (current, self.args) = self
-            .args
-            .split_once(':')
-            .unwrap_or((self.args, ""));
+        (current, self.args) = self.args.split_once(':').unwrap_or((self.args, ""));
 
         current.parse().ok()
     }

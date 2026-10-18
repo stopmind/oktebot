@@ -1,7 +1,9 @@
 use crate::{
     bot::{
+        BotContext,
+        router::{CallbackInfo, CommandInfo},
         scheme::INDEX_CALLBACK,
-        session::SessionState,
+        session::{SessionState, Sessions},
         utils::{cancel_button, menu_button},
     },
     config::Config,
@@ -22,16 +24,12 @@ use teloxide::{
     payloads::{SendMessageSetters, SendPhotoSetters},
     requests::Requester,
     types::{
-        ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message,
-        ParseMode, ReplyMarkup, UserId,
+        ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message, ParseMode,
+        ReplyMarkup, User, UserId,
     },
 };
-use teloxide::types::User;
 use tokio::time::sleep;
 use url::Url;
-use crate::bot::BotContext;
-use crate::bot::router::{CallbackInfo, CommandInfo};
-use crate::bot::session::Sessions;
 
 async fn check_game_index(id: i32, title: &str) -> Result<bool> {
     let response = reqwest::get(Url::parse_with_params(
@@ -109,17 +107,15 @@ async fn get_game_data_by_id(token: &str, game_id: i32) -> Result<GameDataById> 
 }
 
 async fn index(
-    db: &OknoId,
-    bot: &Bot,
-    config: &Config,
-    limiter: &Limiter,
+    ctx: &BotContext,
     chat_id: ChatId,
     user_id: UserId,
     url: &str,
     add_buttons: bool,
 ) -> Result<bool> {
-    if !limiter.check(user_id) {
-        bot.send_message(chat_id, "Между запросами должно пройти 2 минуты.")
+    if !ctx.limiter.check(user_id) {
+        ctx.bot
+            .send_message(chat_id, "Между запросами должно пройти 2 минуты.")
             .reply_markup(InlineKeyboardMarkup::new(
                 add_buttons.then(|| [menu_button()]),
             ))
@@ -131,8 +127,8 @@ async fn index(
         && let Some(domain) = url.domain()
         && domain.ends_with("itch.io")
     {
-        limiter.write_use(user_id);
-        let data = match get_game_data_by_url(config.itch_token.as_str(), url).await {
+        ctx.limiter.write_use(user_id);
+        let data = match get_game_data_by_url(ctx.config.itch_token.as_str(), url).await {
             Ok(data) => data,
             Err(err) => {
                 error!("error get game data: {err:?}");
@@ -148,7 +144,8 @@ async fn index(
                     _ => "Не удалось получить информацию о игре с серверов itch.io",
                 };
 
-                bot.send_message(chat_id, msg)
+                ctx.bot
+                    .send_message(chat_id, msg)
                     .reply_markup(InlineKeyboardMarkup::new(
                         add_buttons.then(|| [menu_button()]),
                     ))
@@ -162,7 +159,7 @@ async fn index(
         let msg = if is_indexed {
             "Игра уже проиндексирована!"
         } else {
-            let changed = db.add_index_sub(user_id, data.id).await?;
+            let changed = ctx.db.add_index_sub(user_id, data.id).await?;
             if changed {
                 "Когда игра будет проиндексирована вы получите уведомление."
             } else {
@@ -170,7 +167,7 @@ async fn index(
             }
         };
 
-        let mut send = bot.send_message(chat_id, msg);
+        let mut send = ctx.bot.send_message(chat_id, msg);
         if add_buttons {
             send.reply_markup = Some(ReplyMarkup::inline_kb([[menu_button()]]))
         }
@@ -178,7 +175,7 @@ async fn index(
 
         Ok(true)
     } else {
-        let mut send = bot.send_message(
+        let mut send = ctx.bot.send_message(
             chat_id,
             "Вы должны указать ссылку на игру с itch.io, начинающаяся с https://",
         );
@@ -195,13 +192,10 @@ async fn index(
 pub async fn on_index_url_message(
     ctx: &BotContext,
     message: &Message,
-    (user,): (&User,)
+    (user,): (&User,),
 ) -> Result<()> {
     let finished = index(
-        &ctx.db,
-        &ctx.bot,
-        &ctx.config,
-        &ctx.limiter,
+        ctx,
         message.chat.id,
         user.id,
         message.text().unwrap_or(""),
@@ -216,7 +210,13 @@ pub async fn on_index_url_message(
     Ok(())
 }
 
-async fn start_index_dialogue(bot: &Bot, limiter: &Limiter, sessions: &Sessions, chat_id: ChatId, user_id: UserId) -> Result<()> {
+async fn start_index_dialogue(
+    bot: &Bot,
+    limiter: &Limiter,
+    sessions: &Sessions,
+    chat_id: ChatId,
+    user_id: UserId,
+) -> Result<()> {
     if !limiter.check(user_id) {
         bot.send_message(chat_id, "Между запросами должно пройти 2 минуты.")
             .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
@@ -237,39 +237,34 @@ pub async fn on_index_command(
     (url,): (String,),
 ) -> Result<()> {
     if url.is_empty() {
-        start_index_dialogue(&ctx.bot, &ctx.limiter, &ctx.sessions, info.chat.id, info.from.id,).await?;
-    } else {
-        index(
-            &ctx.db,
+        start_index_dialogue(
             &ctx.bot,
-            &ctx.config,
             &ctx.limiter,
+            &ctx.sessions,
             info.chat.id,
             info.from.id,
-            url.as_str(),
-            false,
         )
         .await?;
+    } else {
+        index(ctx, info.chat.id, info.from.id, url.as_str(), false).await?;
     }
 
     Ok(())
 }
 
-pub async fn on_index_callback(
-    ctx: &BotContext,
-    info: &CallbackInfo,
-    (): (),
-) -> Result<()> {
-    start_index_dialogue(&ctx.bot, &ctx.limiter, &ctx.sessions, info.message.chat().id, info.from.id).await?;
+pub async fn on_index_callback(ctx: &BotContext, info: &CallbackInfo, (): ()) -> Result<()> {
+    start_index_dialogue(
+        &ctx.bot,
+        &ctx.limiter,
+        &ctx.sessions,
+        info.message.chat().id,
+        info.from.id,
+    )
+    .await?;
     Ok(())
 }
 
-pub async fn on_index_help_callback(
-    ctx: &BotContext,
-    info: &CallbackInfo,
-    (): (),
-) -> Result<()> {
-
+pub async fn on_index_help_callback(ctx: &BotContext, info: &CallbackInfo, (): ()) -> Result<()> {
     ctx.bot.send_photo(info.message.chat().id, InputFile::url(ctx.config.banners.index.clone()))
         .caption("<b>OknoIndexCheck</b> — удобный <b>инструмент</b>, чтобы разобраться в индексации ваших игр на itch io.
 

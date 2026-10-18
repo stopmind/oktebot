@@ -1,7 +1,11 @@
 use crate::{
     bot::{
+        index::Limiter,
         router::{CallbackInfo, CommandInfo},
-        scheme::{HELP_CALLBACK, INDEX_HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK, UNIT_INFO_CALLBACK},
+        scheme::{
+            HELP_CALLBACK, INDEX_HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK,
+            UNIT_INFO_CALLBACK,
+        },
         session::{SessionState, Sessions},
         utils::menu_button,
     },
@@ -10,13 +14,12 @@ use crate::{
 };
 use std::sync::Arc;
 use teloxide::{
+    RequestError,
     prelude::*,
     types::{
         BotCommand, Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Me, ParseMode,
     },
-    RequestError,
 };
-use crate::bot::index::Limiter;
 
 mod args;
 pub mod index;
@@ -34,7 +37,7 @@ pub struct BotContext {
     pub db: Arc<OknoId>,
     pub me: Me,
     pub sessions: Sessions,
-    pub limiter: Arc<Limiter>
+    pub limiter: Arc<Limiter>,
 }
 
 pub async fn invalid_usage_message(bot: &Bot, chat_id: ChatId) -> Result<(), RequestError> {

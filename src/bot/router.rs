@@ -1,13 +1,18 @@
 #![allow(clippy::type_complexity)]
 use crate::{
-    bot::{args::HandlerArgs, BotContext},
+    bot::{
+        BotContext,
+        args::{CallbackParsingState, CommandParsingState, HandlerArgs},
+        invalid_usage_message, profile,
+    },
     oknoid::OknoId,
 };
 use anyhow::bail;
-use futures::{future::BoxFuture, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, future::BoxFuture};
 use log::{error, warn};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use teloxide::{
+    Bot,
     requests::Requester,
     types::{
         CallbackQuery, Chat, ChatKind, MaybeInaccessibleMessage, MediaKind, Message, MessageCommon,
@@ -15,10 +20,7 @@ use teloxide::{
     },
     update_listeners,
     update_listeners::AsUpdateStream,
-    Bot,
 };
-use crate::bot::args::{CallbackParsingState, CommandParsingState};
-use crate::bot::invalid_usage_message;
 
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub enum PrivilegeLevel {
@@ -165,19 +167,23 @@ impl CallbackHandler {
             opts,
             func: Box::new(move |ctx, info| {
                 let mut state = CallbackParsingState::new(info.data.as_str());
-                HandlerArgs::parse_from_state(&mut state)
-                    .map(|args| f(ctx, info, args))
+                HandlerArgs::parse_from_state(&mut state).map(|args| f(ctx, info, args))
             }),
         }
     }
 }
 
-
 #[derive(Default)]
 pub struct Router {
     commands_actions: HashMap<String, CommandHandler>,
     callbacks_actions: HashMap<String, CallbackHandler>,
-    state_handler: Option<Box<dyn for<'a> Fn(&'a BotContext, &'a Message) -> Option<BoxFuture<'a, anyhow::Result<()>>> + Send + Sync>>
+    state_handler: Option<
+        Box<
+            dyn for<'a> Fn(&'a BotContext, &'a Message) -> Option<BoxFuture<'a, anyhow::Result<()>>>
+                + Send
+                + Sync,
+        >,
+    >,
 }
 
 impl Router {
@@ -223,7 +229,10 @@ impl Router {
 
     pub fn state(
         &mut self,
-        f: impl for<'a> Fn(&'a BotContext, &'a Message) -> Option<BoxFuture<'a, anyhow::Result<()>>> + Send + Sync + 'static,
+        f: impl for<'a> Fn(&'a BotContext, &'a Message) -> Option<BoxFuture<'a, anyhow::Result<()>>>
+        + Send
+        + Sync
+        + 'static,
     ) -> &mut Self {
         self.state_handler = Some(Box::new(f));
         self
@@ -240,7 +249,9 @@ impl Router {
     }
 
     async fn handle_message(&self, ctx: &BotContext, message: Message) -> anyhow::Result<()> {
-        if let Some(future) = self.state_handler.as_ref()
+        if let Some(future) = self
+            .state_handler
+            .as_ref()
             .and_then(|handler| handler(ctx, &message))
         {
             return future.await;
@@ -260,6 +271,10 @@ impl Router {
         else {
             return Ok(());
         };
+
+        if let Err(err) = profile::check_registration(&ctx.db, &from).await {
+            error!("failed check registration: {}", err);
+        }
 
         let text = text.text;
 
@@ -340,7 +355,10 @@ impl Router {
 
         if allowed {
             if handler.opts.remove_old_message
-                && let Err(err) = ctx.bot.delete_message(message.chat().id, message.id()).await
+                && let Err(err) = ctx
+                    .bot
+                    .delete_message(message.chat().id, message.id())
+                    .await
             {
                 warn!("Failed to delete old message: {}", err);
             }
@@ -404,8 +422,12 @@ macro_rules! w {
 
 #[macro_export]
 macro_rules! __state_arg {
-    ($user:expr, [user]) => {$user};
-    ($user:expr, $exp:expr) => {$exp};
+    ($user:expr, [user]) => {
+        $user
+    };
+    ($user:expr, $exp:expr) => {
+        $exp
+    };
 }
 
 #[macro_export]

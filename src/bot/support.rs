@@ -1,19 +1,20 @@
-use crate::{bot::{
-    router::{CallbackInfo, CommandInfo},
-    scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX, SUPPORT_SELECTED_CALLBACK_PREFIX},
-    session::SessionState,
-    utils::menu_button,
-    BotContext,
-}, config::Config, fmt_callback};
-use anyhow::{anyhow, Result};
-use std::{
-    fmt::{Display, Formatter}
+use crate::{
+    bot::{
+        BotContext,
+        router::{CallbackInfo, CommandInfo},
+        scheme::{CANCEL_CALLBACK, PROFILE_CALLBACK_PREFIX, SUPPORT_SELECTED_CALLBACK_PREFIX},
+        session::SessionState,
+        utils::menu_button,
+    },
+    config::Config,
+    fmt_callback,
 };
+use anyhow::{Result, anyhow};
+use std::fmt::{Display, Formatter};
 use teloxide::{
     prelude::{Message, *},
-    types::{Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode},
+    types::{Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode, User},
 };
-use teloxide::types::User;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum SupportCategory {
@@ -61,11 +62,7 @@ pub fn choice_button(category: SupportCategory) -> InlineKeyboardButton {
     )
 }
 
-async fn support(
-    bot: &Bot,
-    config: &Config,
-    chat: &Chat,
-) -> Result<()> {
+async fn support(bot: &Bot, config: &Config, chat: &Chat) -> Result<()> {
     let buttons = vec![
         vec![choice_button(SupportCategory::ChangeSubmit)],
         vec![
@@ -124,16 +121,19 @@ pub async fn on_support_message(
 ) -> Result<()> {
     ctx.sessions.set(user.id, SessionState::Empty);
 
-    let callback =  fmt_callback!(PROFILE_CALLBACK_PREFIX, user.id);
+    let callback = fmt_callback!(PROFILE_CALLBACK_PREFIX, user.id);
 
-    ctx.bot.forward_message(ctx.config.support_chat, message.chat.id, message.id)
+    ctx.bot
+        .forward_message(ctx.config.support_chat, message.chat.id, message.id)
         .await?;
-    ctx.bot.send_message(ctx.config.support_chat, format!("Категория: {category}"))
+    ctx.bot
+        .send_message(ctx.config.support_chat, format!("Категория: {category}"))
         .reply_markup(InlineKeyboardMarkup::new([[
             InlineKeyboardButton::callback("Описание профиля", callback),
         ]]))
         .await?;
-    ctx.bot.send_message(message.chat.id, "Сообщение отправлено!")
+    ctx.bot
+        .send_message(message.chat.id, "Сообщение отправлено!")
         .reply_markup(InlineKeyboardMarkup::new([[menu_button()]]))
         .await?;
 

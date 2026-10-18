@@ -27,7 +27,9 @@ pub struct Sessions {
 
 impl Sessions {
     pub fn get(&self, id: UserId) -> SessionState {
-        self.data.lock().unwrap()
+        self.data
+            .lock()
+            .unwrap()
             .get(&id)
             .map(|entry| entry.state)
             .unwrap_or_default()
@@ -38,6 +40,7 @@ impl Sessions {
         data.insert(id, SessionEntry { state });
     }
 
+    #[allow(dead_code)]
     pub fn update(&self, id: UserId, f: impl FnOnce(&mut SessionState)) {
         let mut data = self.data.lock().unwrap();
         if let Some(entry) = data.get_mut(&id) {
@@ -46,11 +49,7 @@ impl Sessions {
             let mut state = SessionState::default();
             f(&mut state);
             if state != SessionState::default() {
-                data.insert(id,
-                    SessionEntry {
-                        state
-                    }
-                );
+                data.insert(id, SessionEntry { state });
             }
         }
     }
