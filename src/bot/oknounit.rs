@@ -211,6 +211,7 @@ pub async fn on_unit_report_message(
     message: &Message,
     (user, drop_id): (&User, DropId),
 ) -> anyhow::Result<()> {
+    ctx.sessions.set(user.id, SessionState::Empty);
     let drop = ctx.db.get_drop(drop_id).await?;
 
     ctx.bot

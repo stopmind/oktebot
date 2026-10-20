@@ -38,7 +38,7 @@ pub fn scheme() -> Router {
     let mut router = Router::default();
 
     router
-        .state(states!{
+        .state(states! {
             SessionState::WaitUnitReport { drop_id } => on_unit_report_message([user], drop_id),
             SessionState::WaitBioMessage => on_bio_message([user]),
             SessionState::WaitSupportMessage { category } => on_support_message([user], category),
