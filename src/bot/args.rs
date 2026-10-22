@@ -69,7 +69,7 @@ impl<'s> CallbackParsingState<'s> {
 impl ParsingState for CallbackParsingState<'_> {
     fn parse<T: FromStr>(&mut self) -> Option<T> {
         let current;
-        let deli = if self.old_deli { '-' } else { ':' } ;
+        let deli = if self.old_deli { '-' } else { ':' };
         (current, self.args) = self.args.split_once(deli).unwrap_or((self.args, ""));
 
         current.parse().ok()

@@ -6,7 +6,8 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
-podman run -v $(pwd):/mnt:rw -i -t rust:bookworm sh -c "cd /mnt && cargo build --target x86_64-unknown-linux-gnu --release"
+mkdir -p ./cargo_cache
+podman run -v $(pwd):/mnt:rw -v $(pwd)/cargo_cache:/var/cache/cargo:rw -i -t rust:bookworm sh -c "cd /mnt && CARGO_HOME=/var/cache/cargo  cargo build --target x86_64-unknown-linux-gnu --release"
 git tag $1
 git push origin --tags
 gh release new $1 --notes-from-tag -t $1 ./target/x86_64-unknown-linux-gnu/release/oktebot

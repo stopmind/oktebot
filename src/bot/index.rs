@@ -10,7 +10,7 @@ use crate::{
     oknoid::OknoId,
 };
 use anyhow::{Result, anyhow};
-use log::{error, info};
+use log::{error, info, warn};
 use reqwest::{Client, IntoUrl, Method, StatusCode};
 use scraper::{Html, Selector};
 use serde::{Deserialize, de::DeserializeOwned};
@@ -115,7 +115,7 @@ async fn index(
 ) -> Result<bool> {
     if !ctx.limiter.check(user_id) {
         ctx.bot
-            .send_message(chat_id, "Между запросами должно пройти 2 минуты.")
+            .send_message(chat_id, "Между запросами должно пройти 10 секунд.")
             .reply_markup(InlineKeyboardMarkup::new(
                 add_buttons.then(|| [menu_button()]),
             ))
@@ -281,6 +281,13 @@ pub async fn on_index_help_callback(ctx: &BotContext, info: &CallbackInfo, (): (
 }
 
 async fn check_games(bot: &Bot, db: &OknoId, itch_token: &str) -> Result<()> {
+    async fn full_game_check(itch_token: &str, game_id: i32) -> Result<(GameDataById, bool)> {
+        let data = get_game_data_by_id(itch_token, game_id).await?;
+        check_game_index(game_id, data.title.as_str())
+            .await
+            .map(|is_indexed| (data, is_indexed))
+    }
+
     let notify_user = async |user_id, url: &Url, title: &str| -> Result<()> {
         let msg = format!("Игра <b>{title}</b> была проиндексирована: {}", url);
         bot.send_message(user_id, msg)
@@ -298,14 +305,29 @@ async fn check_games(bot: &Bot, db: &OknoId, itch_token: &str) -> Result<()> {
         if let Some((url, title)) = indexed_games.get(&game_id) {
             notify_user(user_id, url, title.as_str()).await?;
         } else {
-            let GameDataById { title, url } = get_game_data_by_id(itch_token, game_id).await?;
-            let is_indexed = check_game_index(game_id, title.as_str()).await?;
-
-            if is_indexed {
-                info!("game indexed: {game_id}");
-                notify_user(user_id, &url, title.as_str()).await?;
-                indexed_games.insert(game_id, (url, title));
-                db.remove_index_subs(game_id).await?;
+            loop {
+                match full_game_check(itch_token, game_id).await {
+                    Ok((data, is_indexed)) => {
+                        if is_indexed {
+                            info!("game indexed: {game_id}");
+                            notify_user(user_id, &data.url, data.title.as_str()).await?;
+                            indexed_games.insert(game_id, (data.url, data.title));
+                            db.remove_index_subs(game_id).await?;
+                        }
+                        break;
+                    }
+                    Err(err)
+                        if let Some(err) = err.downcast_ref::<reqwest::Error>()
+                            && err.status() == Some(StatusCode::TOO_MANY_REQUESTS) =>
+                    {
+                        warn!("too many requests while checking games, sleep");
+                        sleep(Duration::from_mins(1)).await;
+                    }
+                    Err(err) => {
+                        error!("failed to check game {game_id}: {err}");
+                        break;
+                    }
+                }
             }
         }
     }
@@ -322,7 +344,7 @@ pub async fn check_games_index_worker(bot: Bot, config: Arc<Config>, db: Arc<Okn
     }
 }
 
-const TIMEOUT: Duration = Duration::from_mins(2);
+const TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Default)]
 pub struct Limiter {

@@ -4,6 +4,11 @@ use crate::{
         BotContext,
         args::{CallbackParsingState, CommandParsingState, HandlerArgs},
         invalid_usage_message, profile,
+        scheme::{
+            DROPS_HISTORY_CALLBACK_PREFIX, PROFILE_CALLBACK_PREFIX,
+            SUPPORT_SELECTED_CALLBACK_PREFIX, TOP_CALLBACK_PREFIX,
+            UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, UNIT_REPORT_CALLBACK_PREFIX,
+        },
     },
     oknoid::OknoId,
 };
@@ -21,7 +26,6 @@ use teloxide::{
     update_listeners,
     update_listeners::AsUpdateStream,
 };
-use crate::bot::scheme::{DROPS_HISTORY_CALLBACK_PREFIX, PROFILE_CALLBACK_PREFIX, SUPPORT_SELECTED_CALLBACK_PREFIX, TOP_CALLBACK_PREFIX, UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, UNIT_REPORT_CALLBACK_PREFIX};
 
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub enum PrivilegeLevel {
@@ -350,19 +354,18 @@ impl Router {
 
         let (callback_name, mut args) = match info.data.find(':') {
             None => (info.data.as_str(), ""),
-            Some(pos) => (&info.data[..pos], &info.data[pos+1..]),
+            Some(pos) => (&info.data[..pos], &info.data[pos + 1..]),
         };
 
         let mut old_deli = false;
 
-        let handler = self.callbacks_actions.get(callback_name)
-            .or_else(|| {
-                let (name, new_args) = try_parse_old(info.data.as_str());
-                args = new_args;
-                old_deli = true;
-                info!("callback {} parsed as {name}:{args}", info.data);
-                self.callbacks_actions.get(name)
-            });
+        let handler = self.callbacks_actions.get(callback_name).or_else(|| {
+            let (name, new_args) = try_parse_old(info.data.as_str());
+            args = new_args;
+            old_deli = true;
+            info!("callback {} parsed as {name}:{args}", info.data);
+            self.callbacks_actions.get(name)
+        });
         let Some(handler) = handler else {
             bail!("unknown callback: {}", callback_name);
         };
@@ -433,7 +436,7 @@ fn try_parse_old(old: &str) -> (&str, &str) {
         UNIT_REPORT_CALLBACK_PREFIX,
         UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX,
         DROPS_HISTORY_CALLBACK_PREFIX,
-        TOP_CALLBACK_PREFIX
+        TOP_CALLBACK_PREFIX,
     ];
 
     for prefix in PREFIXES {

@@ -1,1 +1,6 @@
 /target
+/cargo_cache
+.idea
+Cargo.lock
+config.toml
+storage
