@@ -1,20 +1,15 @@
+mod api;
 mod bot;
 mod config;
+pub mod login;
 mod oknoid;
 
-use crate::{
-    bot::{BotContext, index, index::Limiter, scheme::scheme, session::Sessions, set_commands},
-    config::Config,
-    oknoid::OknoId,
-};
+use crate::{api::serve_api, bot::start_bot, config::Config, login::Login, oknoid::OknoId};
 use anyhow::anyhow;
-use log::{LevelFilter, error, info};
+use log::{LevelFilter, error};
 use std::{env, fs, sync::Arc};
-use teloxide::prelude::*;
 
 async fn start() -> anyhow::Result<()> {
-    info!("Starting bot...");
-
     let config_path = env::var("OKTEBOT_CONFIG");
     let config_path = config_path
         .as_ref()
@@ -29,43 +24,21 @@ async fn start() -> anyhow::Result<()> {
     }
 
     let db = Arc::new(OknoId::open(config.clone()).await?);
-    let bot = Bot::new(config.token.clone());
+    let login = Arc::new(Login::default());
+
+    tokio::spawn(login.clone().clear_token_worker());
 
     tokio::spawn({
-        let bot = bot.clone();
-        async move {
-            if let Err(err) = set_commands(&bot).await {
-                error!("{}", err);
+        let db = db.clone();
+        let login = login.clone();
+
+        async {
+            if let Err(err) = serve_api(db, login).await {
+                error!("api server error: {}", err);
             }
         }
     });
-
-    tokio::spawn({
-        let bot = bot.clone();
-        let config = config.clone();
-        let db = db.clone();
-        index::check_games_index_worker(bot, config, db)
-    });
-
-    let limiter = Arc::new(Limiter::default());
-
-    tokio::spawn(limiter.clone().worker());
-
-    let me = bot.get_me().await?;
-
-    let router = Arc::new(scheme());
-    router
-        .handle_updates(Arc::new(BotContext {
-            bot,
-            config,
-            db,
-            me,
-            sessions: Sessions::default(),
-            limiter,
-        }))
-        .await;
-
-    Ok(())
+    start_bot(config, db, login).await
 }
 
 #[tokio::main]

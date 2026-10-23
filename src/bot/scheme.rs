@@ -1,5 +1,6 @@
 use crate::{
     bot::{
+        auth::on_auth_command,
         index::{
             on_index_callback, on_index_command, on_index_help_callback, on_index_url_message,
         },
@@ -70,6 +71,8 @@ pub fn scheme() -> Router {
         .command("unban", w!(on_unban_command), HandlerOptions::empty()
             .required_privilege(PrivilegeLevel::Admin))
         .command("index", w!(on_index_command), HandlerOptions::empty())
+        .command("auth", w!(on_auth_command), HandlerOptions::empty()
+            .only_private(true))
 
         .callback(CANCEL_CALLBACK, w!(on_cancel_callback), HandlerOptions::empty())
         .callback(HELP_CALLBACK, w!(on_help_callback), HandlerOptions::empty())

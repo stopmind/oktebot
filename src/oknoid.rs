@@ -4,6 +4,7 @@ use crate::{
 };
 use futures::{TryStreamExt, stream::StreamExt};
 use log::info;
+use serde::Serialize;
 use sqlx::{Error, FromRow, SqlitePool, migrate::Migrator, sqlite::SqliteConnectOptions};
 use std::{
     borrow::Cow,
@@ -39,7 +40,8 @@ impl IdError {
 
 pub type IdResult<T> = Result<T, IdError>;
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Role {
     Admin = 1,
     SuperAdmin = 2,
@@ -76,7 +78,7 @@ impl Role {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize)]
 pub struct UserInfo {
     pub username: Option<String>,
     pub first_name: String,

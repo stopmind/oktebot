@@ -4,14 +4,16 @@ use crate::{
         router::{CallbackInfo, CommandInfo},
         scheme::{
             HELP_CALLBACK, INDEX_HELP_CALLBACK, ME_CALLBACK, SUPPORT_CALLBACK, TOP_CALLBACK,
-            UNIT_INFO_CALLBACK,
+            UNIT_INFO_CALLBACK, scheme,
         },
         session::{SessionState, Sessions},
         utils::menu_button,
     },
     config::Config,
+    login::Login,
     oknoid::OknoId,
 };
+use log::{error, info};
 use std::sync::Arc;
 use teloxide::{
     RequestError,
@@ -22,7 +24,9 @@ use teloxide::{
 };
 
 mod args;
+mod auth;
 pub mod index;
+mod login;
 mod oknounit;
 pub mod profile;
 mod router;
@@ -38,6 +42,54 @@ pub struct BotContext {
     pub me: Me,
     pub sessions: Sessions,
     pub limiter: Arc<Limiter>,
+    pub login: Arc<Login>,
+}
+
+pub async fn start_bot(
+    config: Arc<Config>,
+    db: Arc<OknoId>,
+    login: Arc<Login>,
+) -> anyhow::Result<()> {
+    info!("starting bot...");
+
+    let bot = Bot::new(config.token.clone());
+
+    tokio::spawn({
+        let bot = bot.clone();
+        async move {
+            if let Err(err) = set_commands(&bot).await {
+                error!("{}", err);
+            }
+        }
+    });
+
+    tokio::spawn({
+        let bot = bot.clone();
+        let config = config.clone();
+        let db = db.clone();
+        index::check_games_index_worker(bot, config, db)
+    });
+
+    let limiter = Arc::new(Limiter::default());
+
+    tokio::spawn(limiter.clone().worker());
+
+    let me = bot.get_me().await?;
+
+    let router = Arc::new(scheme());
+    router
+        .handle_updates(Arc::new(BotContext {
+            bot,
+            config,
+            db,
+            me,
+            sessions: Sessions::default(),
+            limiter,
+            login,
+        }))
+        .await;
+
+    Ok(())
 }
 
 pub async fn invalid_usage_message(bot: &Bot, chat_id: ChatId) -> Result<(), RequestError> {
@@ -91,6 +143,7 @@ pub async fn send_help_message(
         /unit - информация о OKNO Unit.\n\
         /feedback <code>&lt;drop id&gt;</code> - оставить фидбек по id дропа.\n\
         /index <code>&lt;ссылка на игру с itch.io&gt;</code> - подписатся на индесирование игры с itch.io.\n\
+        /auth - получить токен для входа.\n\
     "
     .to_owned();
 
@@ -145,6 +198,7 @@ pub async fn set_commands(bot: &Bot) -> anyhow::Result<()> {
         BotCommand::new("top", "топ пользователей по репутации"),
         BotCommand::new("unit", "информация о OknoUnit"),
         BotCommand::new("index", "проверить индексацию игры"),
+        BotCommand::new("auth", "получить токен входа"),
     ])
     .await?;
 
