@@ -41,16 +41,14 @@ async fn check_game_index(id: i32, title: &str) -> Result<bool> {
     let id_str = id.to_string();
 
     let selector = Selector::parse(".game_cell").unwrap();
-
-    info!("Title: {title} Id: {id_str}");
-
     for element in document.select(&selector) {
-        info!(" Found: {}", element.attr("data-game_id").unwrap_or("NONE"));
         if element.attr("data-game_id") == Some(id_str.as_str()) {
+            info!("title: {title} Id: {id_str} found");
             return Ok(true);
         }
     }
 
+    info!("title: {title} Id: {id_str} not found.");
     Ok(false)
 }
 
