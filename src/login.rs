@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow, bail};
-use base64::{Engine, prelude::BASE64_STANDARD};
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use rand::{RngExt, SeedableRng, rngs::SysRng};
 use rand_chacha::ChaCha20Rng;
 use std::{
@@ -68,11 +68,11 @@ impl Login {
             token_val
         };
 
-        Ok(BASE64_STANDARD.encode(token_val))
+        Ok(BASE64_URL_SAFE_NO_PAD.encode(token_val))
     }
 
     pub fn check_token(&self, token: &str) -> Result<UserId> {
-        let token_val = BASE64_STANDARD.decode(token)?;
+        let token_val = BASE64_URL_SAFE_NO_PAD.decode(token)?;
         let chunk = token_val
             .first_chunk()
             .ok_or_else(|| anyhow!("invalid token"))?;

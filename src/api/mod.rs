@@ -19,7 +19,7 @@ pub async fn serve_api(db: Arc<OknoId>, login: Arc<Login>) -> Result<()> {
     let ctx = Arc::new(ApiContext { db, login });
 
     let app = Router::new()
-        .route("/v1/auth", get(login::auth))
+        .route("/v1/auth/{token}", get(login::auth))
         .with_state(ctx);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8888").await?;

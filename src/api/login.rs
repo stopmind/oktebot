@@ -1,14 +1,14 @@
 use crate::api::ApiCtx;
 use axum::{
     Json,
-    extract::State,
+    extract::{Path, State},
     response::{IntoResponse, Response},
 };
 use log::error;
 use reqwest::StatusCode;
 
-pub async fn auth(State(ctx): State<ApiCtx>, body: String) -> Response {
-    match ctx.login.check_token(body.as_str()) {
+pub async fn auth(State(ctx): State<ApiCtx>, Path(token): Path<String>) -> Response {
+    match ctx.login.check_token(token.as_str()) {
         Ok(user) => match ctx.db.get_user_info(user).await {
             Ok(user) => (StatusCode::OK, Json(user)).into_response(),
             Err(err) => {
