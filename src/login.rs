@@ -11,7 +11,7 @@ use std::{
 use teloxide::types::UserId;
 use tokio::time::sleep;
 
-const TOKEN_LIVE_DURATION: Duration = Duration::from_hours(2);
+const TOKEN_LIVE_DURATION: Duration = Duration::from_hours(24);
 
 type TokenBase = [u8; 9];
 

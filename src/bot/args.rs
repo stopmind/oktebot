@@ -18,11 +18,16 @@ impl FromStr for Mention {
 
     fn from_str(val: &str) -> Result<Self, Self::Err> {
         if let Some(username) = val.strip_prefix("@") {
-            Ok(Mention::Username(username.to_owned()))
+            username
+                .is_empty()
+                .then(|| Mention::Username(username.to_owned()))
+                .ok_or(InvalidMentionError)
         } else if let Ok(id) = val.parse() {
             Ok(Mention::UserId(UserId(id)))
         } else {
-            Ok(Mention::Firstname(val.to_owned()))
+            val.is_empty()
+                .then(|| Mention::Firstname(val.to_owned()))
+                .ok_or(InvalidMentionError)
         }
     }
 }
@@ -73,18 +78,6 @@ impl ParsingState for CallbackParsingState<'_> {
         (current, self.args) = self.args.split_once(deli).unwrap_or((self.args, ""));
 
         current.parse().ok()
-    }
-}
-
-#[macro_export]
-macro_rules! parser {
-    [$($ty:ty),*] => {
-        |args: &str| -> Option<_> {
-            let mut state = $crate::bot::args:CommandParserStatee::new(args);
-            let res = ($(state.parse::<$ty>()?),*);
-            if state.is_empty() {Some(res)}
-            else {None}
-        }
     }
 }
 

@@ -16,6 +16,7 @@ use anyhow::bail;
 use futures::{FutureExt, StreamExt, future::BoxFuture};
 use log::{error, info, warn};
 use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::cmp::PartialEq;
 use teloxide::{
     Bot,
     requests::Requester,
@@ -26,6 +27,7 @@ use teloxide::{
     update_listeners,
     update_listeners::AsUpdateStream,
 };
+use crate::bot::utils::UtilError;
 
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub enum PrivilegeLevel {
@@ -321,7 +323,13 @@ impl Router {
                     chat,
                     text,
                 };
-                (handler.func)(ctx, &info).await?;
+                if let Err(err) = (handler.func)(ctx, &info).await {
+                    if matches!(err.downcast_ref(), Some(&UtilError::UsageError)) {
+                        invalid_usage_message(&ctx.bot, info.chat.id).await?
+                    } else {
+                        return Err(err);
+                    }
+                }
             }
         }
 
