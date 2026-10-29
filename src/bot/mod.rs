@@ -143,6 +143,7 @@ pub async fn send_help_message(
         /feedback <code>&lt;drop id&gt;</code> - оставить фидбек по id дропа.\n\
         /index <code>&lt;ссылка на игру с itch.io&gt;</code> - подписатся на индесирование игры с itch.io.\n\
         /auth - получить токен для входа.\n\
+        /deact - деактивировать токен.\n\
     "
     .to_owned();
 
