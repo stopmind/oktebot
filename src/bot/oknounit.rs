@@ -328,6 +328,11 @@ pub async fn on_drop_command(
     }
 
     let drop_id = ctx.db.add_drop(link, description).await?;
+
+    ctx.bot
+        .send_message(info.chat.id, format!("Новый дроп создан с id: {drop_id}"))
+        .await?;
+
     let text = format!(
         "Новый дроп сообщества!\n{link}{}{}",
         if description.is_some() { "\n> " } else { "" },
@@ -348,10 +353,6 @@ pub async fn on_drop_command(
             error!("Failed to notify user {unit} about drop {drop_id} due: {err}");
         }
     }
-
-    ctx.bot
-        .send_message(info.chat.id, format!("Новый дроп создан с id: {drop_id}"))
-        .await?;
 
     Ok(())
 }

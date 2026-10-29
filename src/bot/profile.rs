@@ -15,12 +15,13 @@ use std::{fmt::Write, iter};
 use teloxide::{
     Bot,
     payloads::{SendMessageSetters, SendPhotoSetters},
-    prelude::{ChatId, Message, Requester, UserId},
     types::{
         Chat, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, InputFile,
         ParseMode, User,
     },
 };
+use teloxide::requests::Requester;
+use teloxide::types::{ChatId, Message, UserId};
 
 pub async fn check_registration(db: &OknoId, user: &User) -> UtilResult {
     if db.check_user_exists(user.id) {
@@ -189,15 +190,16 @@ pub async fn on_add_admin_command(
 ) -> anyhow::Result<()> {
     let id = get_exactly_one_user(&ctx.bot, &ctx.db, info.chat.id, &mention).await?;
 
-    if ctx.db.give_role(id, Role::Admin).await? {
-        ctx.bot
-            .send_message(info.chat.id, "Пользователь назначен админом.")
-            .await?;
+    let changed = ctx.db.give_role(id, Role::Admin).await?;
+    let msg = if changed {
+        "Пользователь назначен админом."
     } else {
-        ctx.bot
-            .send_message(info.chat.id, "Пользователь уже является админом.")
-            .await?;
-    }
+        "Пользователь уже является админом."
+    };
+
+    ctx.bot
+        .send_message(info.chat.id, msg)
+        .await?;
 
     Ok(())
 }
@@ -209,15 +211,16 @@ pub async fn on_del_admin(
 ) -> anyhow::Result<()> {
     let id = get_exactly_one_user(&ctx.bot, &ctx.db, info.chat.id, &mention).await?;
 
-    if ctx.db.take_role(id, Role::Admin).await? {
-        ctx.bot
-            .send_message(info.chat.id, "Пользователь более не является админом.")
-            .await?;
+    let changed = ctx.db.take_role(id, Role::Admin).await?;
+    let msg = if changed {
+        "Пользователь более не является админом."
     } else {
-        ctx.bot
-            .send_message(info.chat.id, "Пользователь не админ.")
-            .await?;
-    }
+        "Пользователь не админ."
+    };
+
+    ctx.bot
+        .send_message(info.chat.id, msg)
+        .await?;
 
     Ok(())
 }

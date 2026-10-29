@@ -24,9 +24,8 @@ use teloxide::{
         CallbackQuery, Chat, ChatKind, MaybeInaccessibleMessage, MediaKind, Message, MessageCommon,
         MessageId, MessageKind, Update, UpdateKind, User, UserId,
     },
-    update_listeners,
-    update_listeners::AsUpdateStream,
 };
+use teloxide::payloads::GetUpdatesSetters;
 use crate::bot::utils::UtilError;
 
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
@@ -406,13 +405,12 @@ impl Router {
     pub async fn handle_updates(self: Arc<Self>, ctx: Arc<BotContext>) {
         const RETRY_TIME: Duration = Duration::from_secs(5);
 
-        let mut listener = update_listeners::polling_default(ctx.bot.clone()).await;
-        let mut stream = Box::pin(listener.as_stream());
+        let mut requester = UpdateRequester::new(Duration::from_secs(10));
 
         loop {
-            if let Some(res) = stream.next().await {
-                match res {
-                    Ok(update) => {
+            match requester.next_updates(&ctx.bot).await {
+                Ok(updates) => {
+                    for update in updates {
                         tokio::spawn({
                             let this = self.clone();
                             let ctx = ctx.clone();
@@ -424,16 +422,44 @@ impl Router {
                             }
                         });
                     }
-                    Err(err) => {
-                        error!(
+                }
+                Err(err) => {
+                    error!(
                             "failed retrieve error: {err}, retry in {}",
                             RETRY_TIME.as_secs()
                         );
-                        tokio::time::sleep(RETRY_TIME).await;
-                    }
+                    tokio::time::sleep(RETRY_TIME).await;
                 }
             }
         }
+    }
+}
+
+struct UpdateRequester {
+    offset: i32,
+    timeout: u32
+}
+
+impl UpdateRequester {
+    pub fn new(timeout: Duration) -> Self {
+        Self {
+            offset: 0,
+            timeout: timeout.as_secs() as u32,
+        }
+    }
+
+    pub async fn next_updates(&mut self, bot: &Bot) -> anyhow::Result<Vec<Update>> {
+        let updates = bot.get_updates()
+            .timeout(self.timeout)
+            .offset(self.offset)
+            .into_future()
+            .await?;
+
+        if let Some(update) = updates.last() {
+            self.offset = update.id.0 as i32 + 1;
+        }
+
+        Ok(updates)
     }
 }
 

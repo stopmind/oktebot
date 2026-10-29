@@ -41,7 +41,7 @@ async fn start() -> anyhow::Result<()> {
     start_bot(config, db, login).await
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     stop_log::init(None, LevelFilter::Info);
     if let Err(e) = start().await {
