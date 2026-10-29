@@ -11,10 +11,14 @@ use crate::{
 };
 use anyhow::{Result, anyhow};
 use std::fmt::{Display, Formatter};
-use teloxide::{types::{Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode, User}, Bot};
-use teloxide::payloads::{SendMessageSetters, SendPhotoSetters};
-use teloxide::requests::Requester;
-use teloxide::types::Message;
+use teloxide::{
+    Bot,
+    payloads::{SendMessageSetters, SendPhotoSetters},
+    requests::Requester,
+    types::{
+        Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Message, ParseMode, User,
+    },
+};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum SupportCategory {

@@ -9,24 +9,23 @@ use crate::{
             SUPPORT_SELECTED_CALLBACK_PREFIX, TOP_CALLBACK_PREFIX,
             UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, UNIT_REPORT_CALLBACK_PREFIX,
         },
+        utils::UtilError,
     },
     oknoid::OknoId,
 };
 use anyhow::bail;
-use futures::{FutureExt, StreamExt, future::BoxFuture};
+use futures::{FutureExt, future::BoxFuture};
 use log::{error, info, warn};
-use std::{collections::HashMap, sync::Arc, time::Duration};
-use std::cmp::PartialEq;
+use std::{cmp::PartialEq, collections::HashMap, sync::Arc, time::Duration};
 use teloxide::{
     Bot,
+    payloads::GetUpdatesSetters,
     requests::Requester,
     types::{
         CallbackQuery, Chat, ChatKind, MaybeInaccessibleMessage, MediaKind, Message, MessageCommon,
         MessageId, MessageKind, Update, UpdateKind, User, UserId,
     },
 };
-use teloxide::payloads::GetUpdatesSetters;
-use crate::bot::utils::UtilError;
 
 #[derive(Default, Copy, Clone, Eq, PartialEq)]
 pub enum PrivilegeLevel {
@@ -425,9 +424,9 @@ impl Router {
                 }
                 Err(err) => {
                     error!(
-                            "failed retrieve error: {err}, retry in {}",
-                            RETRY_TIME.as_secs()
-                        );
+                        "failed retrieve error: {err}, retry in {}",
+                        RETRY_TIME.as_secs()
+                    );
                     tokio::time::sleep(RETRY_TIME).await;
                 }
             }
@@ -437,7 +436,7 @@ impl Router {
 
 struct UpdateRequester {
     offset: i32,
-    timeout: u32
+    timeout: u32,
 }
 
 impl UpdateRequester {
@@ -449,7 +448,8 @@ impl UpdateRequester {
     }
 
     pub async fn next_updates(&mut self, bot: &Bot) -> anyhow::Result<Vec<Update>> {
-        let updates = bot.get_updates()
+        let updates = bot
+            .get_updates()
             .timeout(self.timeout)
             .offset(self.offset)
             .into_future()

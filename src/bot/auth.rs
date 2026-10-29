@@ -27,3 +27,18 @@ pub async fn on_auth_command(ctx: &BotContext, info: &CommandInfo, _: ()) -> any
         }
     }
 }
+
+pub async fn on_deactivate_command(
+    ctx: &BotContext,
+    info: &CommandInfo,
+    _: (),
+) -> anyhow::Result<()> {
+    let msg = if ctx.login.remove(info.from.id) {
+        "Ваш токен отозван."
+    } else {
+        "У вас нет активного токена."
+    };
+
+    ctx.bot.send_message(info.chat.id, msg).await?;
+    Ok(())
+}

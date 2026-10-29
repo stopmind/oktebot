@@ -111,4 +111,15 @@ impl Login {
             self.clear_tokens();
         }
     }
+
+    /// true if token successfully removed
+    pub fn remove(&self, user_id: UserId) -> bool {
+        let mut this = self.0.lock().unwrap();
+        let token = this.users_tokens.remove(&user_id);
+        if let Some(token) = token {
+            this.tokens_users.remove(&token);
+        }
+
+        token.is_some()
+    }
 }

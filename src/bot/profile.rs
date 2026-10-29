@@ -15,13 +15,12 @@ use std::{fmt::Write, iter};
 use teloxide::{
     Bot,
     payloads::{SendMessageSetters, SendPhotoSetters},
+    requests::Requester,
     types::{
-        Chat, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup, InputFile,
-        ParseMode, User,
+        Chat, ChatId, InlineKeyboardButton, InlineKeyboardButtonKind, InlineKeyboardMarkup,
+        InputFile, Message, ParseMode, User, UserId,
     },
 };
-use teloxide::requests::Requester;
-use teloxide::types::{ChatId, Message, UserId};
 
 pub async fn check_registration(db: &OknoId, user: &User) -> UtilResult {
     if db.check_user_exists(user.id) {
@@ -197,9 +196,7 @@ pub async fn on_add_admin_command(
         "Пользователь уже является админом."
     };
 
-    ctx.bot
-        .send_message(info.chat.id, msg)
-        .await?;
+    ctx.bot.send_message(info.chat.id, msg).await?;
 
     Ok(())
 }
@@ -218,9 +215,7 @@ pub async fn on_del_admin(
         "Пользователь не админ."
     };
 
-    ctx.bot
-        .send_message(info.chat.id, msg)
-        .await?;
+    ctx.bot.send_message(info.chat.id, msg).await?;
 
     Ok(())
 }
