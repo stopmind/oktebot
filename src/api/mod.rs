@@ -1,9 +1,12 @@
 use crate::{login::Login, oknoid::OknoId};
-use axum::{Router, routing::*};
+use axum::{
+    Router,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::*,
+};
 use log::{error, info};
 use std::sync::Arc;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 
 pub mod login;
 
@@ -18,7 +21,7 @@ pub struct ApiError(anyhow::Error);
 
 impl<E> From<E> for ApiError
 where
-    E: Into<anyhow::Error>
+    E: Into<anyhow::Error>,
 {
     fn from(err: E) -> Self {
         ApiError(err.into())

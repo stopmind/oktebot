@@ -212,9 +212,7 @@ impl UsersNames {
 #[derive(Serialize, Copy, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IdEvent {
-    Ban {
-        user_id: UserId,
-    }
+    Ban { user_id: UserId },
 }
 
 pub struct OknoId {
@@ -262,7 +260,7 @@ impl OknoId {
             pool,
             config,
             users_names: users_names.into(),
-            events_sender: broadcast::Sender::new(16)
+            events_sender: broadcast::Sender::new(16),
         })
     }
 
@@ -569,7 +567,7 @@ impl OknoId {
         if self.is_user_banned(id).await? == banned {
             return Ok(false);
         };
-        
+
         sqlx::query("UPDATE users SET banned = ? WHERE id = ?")
             .bind(banned)
             .bind(id.0 as i64)
@@ -577,9 +575,7 @@ impl OknoId {
             .await?;
 
         if banned {
-            let _ = self.events_sender.send(IdEvent::Ban {
-                user_id: id,
-            });
+            let _ = self.events_sender.send(IdEvent::Ban { user_id: id });
         }
 
         Ok(true)
@@ -632,7 +628,7 @@ impl OknoId {
             .try_collect()
             .await
     }
-    
+
     pub fn get_events_receiver(&self) -> broadcast::Receiver<IdEvent> {
         self.events_sender.subscribe()
     }

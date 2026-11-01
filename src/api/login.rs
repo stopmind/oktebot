@@ -1,17 +1,17 @@
-use crate::api::{ApiCtx, ApiError, ApiResult};
+use crate::{
+    api::{ApiCtx, ApiResult},
+    oknoid::IdEvent,
+};
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, State, WebSocketUpgrade, ws::WebSocket},
     response::{IntoResponse, Response},
 };
-use axum::extract::WebSocketUpgrade;
-use axum::extract::ws::{Message, WebSocket};
-use futures::{Sink, SinkExt};
+use futures::SinkExt;
 use log::{error, warn};
 use reqwest::StatusCode;
 use teloxide::types::UserId;
 use tokio::sync::broadcast::error::RecvError;
-use crate::oknoid::IdEvent;
 
 pub async fn auth(State(ctx): State<ApiCtx>, Path(token): Path<String>) -> Response {
     match ctx.login.check_token(token.as_str()) {
@@ -31,7 +31,7 @@ pub async fn auth(State(ctx): State<ApiCtx>, Path(token): Path<String>) -> Respo
 
 pub async fn ban(
     State(ctx): State<ApiCtx>,
-    Path((token, user)): Path<(String, UserId)>
+    Path((token, user)): Path<(String, UserId)>,
 ) -> ApiResult {
     let Ok(admin) = ctx.login.check_token(token.as_str()) else {
         return Ok(StatusCode::UNAUTHORIZED.into_response());
@@ -45,10 +45,7 @@ pub async fn ban(
     Ok(StatusCode::OK.into_response())
 }
 
-pub async fn events_ws(
-    State(ctx): State<ApiCtx>,
-    upgrade: WebSocketUpgrade
-) -> Response {
+pub async fn events_ws(State(ctx): State<ApiCtx>, upgrade: WebSocketUpgrade) -> Response {
     upgrade.on_upgrade(|mut socket| async move {
         let mut receiver = ctx.db.get_events_receiver();
 
@@ -61,7 +58,7 @@ pub async fn events_ws(
                 }
                 Err(RecvError::Lagged(count)) => {
                     warn!("websocket connection dropped {count} events");
-                },
+                }
                 Err(RecvError::Closed) => {
                     error!("events channel closed!");
                     let _ = socket.close().await;
