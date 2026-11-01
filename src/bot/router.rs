@@ -9,7 +9,6 @@ use crate::{
             SUPPORT_SELECTED_CALLBACK_PREFIX, TOP_CALLBACK_PREFIX,
             UNIT_ACCEPT_FEEDBACK_CALLBACK_PREFIX, UNIT_REPORT_CALLBACK_PREFIX,
         },
-        utils::UtilError,
     },
     oknoid::OknoId,
 };
@@ -321,13 +320,7 @@ impl Router {
                     chat,
                     text,
                 };
-                if let Err(err) = (handler.func)(ctx, &info).await {
-                    if matches!(err.downcast_ref(), Some(&UtilError::UsageError)) {
-                        invalid_usage_message(&ctx.bot, info.chat.id).await?
-                    } else {
-                        return Err(err);
-                    }
-                }
+                (handler.func)(ctx, &info).await?;
             }
         }
 

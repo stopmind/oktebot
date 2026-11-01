@@ -14,6 +14,7 @@ use std::{
 };
 use teloxide::prelude::*;
 use thiserror::Error;
+use tokio::sync::broadcast;
 
 #[derive(Error, Debug)]
 pub enum IdError {
@@ -208,10 +209,19 @@ impl UsersNames {
     }
 }
 
+#[derive(Serialize, Copy, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum IdEvent {
+    Ban {
+        user_id: UserId,
+    }
+}
+
 pub struct OknoId {
     pool: SqlitePool,
     config: Arc<Config>,
     users_names: Mutex<UsersNames>,
+    events_sender: broadcast::Sender<IdEvent>,
 }
 
 pub type DropId = i64;
@@ -252,6 +262,7 @@ impl OknoId {
             pool,
             config,
             users_names: users_names.into(),
+            events_sender: broadcast::Sender::new(16)
         })
     }
 
@@ -553,13 +564,25 @@ impl OknoId {
         Ok(is_banned)
     }
 
-    pub async fn set_user_banned(&self, id: UserId, banned: bool) -> IdResult<()> {
+    // true if changed
+    pub async fn set_user_banned(&self, id: UserId, banned: bool) -> IdResult<bool> {
+        if self.is_user_banned(id).await? == banned {
+            return Ok(false);
+        };
+        
         sqlx::query("UPDATE users SET banned = ? WHERE id = ?")
             .bind(banned)
             .bind(id.0 as i64)
             .execute(&self.pool)
             .await?;
-        Ok(())
+
+        if banned {
+            let _ = self.events_sender.send(IdEvent::Ban {
+                user_id: id,
+            });
+        }
+
+        Ok(true)
     }
 
     pub fn get_ids_by_first_name(&self, first_name: &str) -> Vec<UserId> {
@@ -608,5 +631,9 @@ impl OknoId {
             })
             .try_collect()
             .await
+    }
+    
+    pub fn get_events_receiver(&self) -> broadcast::Receiver<IdEvent> {
+        self.events_sender.subscribe()
     }
 }

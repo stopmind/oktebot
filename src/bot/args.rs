@@ -18,16 +18,13 @@ impl FromStr for Mention {
 
     fn from_str(val: &str) -> Result<Self, Self::Err> {
         if let Some(username) = val.strip_prefix("@") {
-            username
-                .is_empty()
-                .then(|| Mention::Username(username.to_owned()))
-                .ok_or(InvalidMentionError)
+            if username.is_empty() {Err(InvalidMentionError)}
+            else { Ok(Mention::Username(username.to_owned())) }
         } else if let Ok(id) = val.parse() {
             Ok(Mention::UserId(UserId(id)))
         } else {
-            val.is_empty()
-                .then(|| Mention::Firstname(val.to_owned()))
-                .ok_or(InvalidMentionError)
+            if val.is_empty() {Err(InvalidMentionError)}
+            else { Ok(Mention::Firstname(val.to_owned())) }
         }
     }
 }

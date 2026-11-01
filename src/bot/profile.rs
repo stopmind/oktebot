@@ -320,11 +320,7 @@ async fn change_banned_state_command(
 ) -> anyhow::Result<()> {
     let target = get_exactly_one_user(&ctx.bot, &ctx.db, info.chat.id, &mention).await?;
 
-    let changed = ctx.db.is_user_banned(target).await? != banned;
-    if changed {
-        ctx.db.set_user_banned(target, banned).await?;
-    }
-
+    let changed = ctx.db.set_user_banned(target, banned).await?;
     let response = if banned {
         if changed {
             "Пользователь забанен."

@@ -5,7 +5,7 @@ use crate::{
     },
     oknoid::{IdError, OknoId},
 };
-use std::{fmt::Write, ops::Not};
+use std::fmt::Write;
 use teloxide::{
     Bot,
     requests::Requester,
@@ -29,23 +29,21 @@ pub enum UtilError {
     TelegramError(#[from] teloxide::RequestError),
     #[error("id error: {0}")]
     IdError(#[from] IdError),
-    #[error("incorrect usage")]
-    UsageError,
 }
 
 pub type UtilResult<T = ()> = Result<T, UtilError>;
 
-pub fn resolve_mention(db: &OknoId, mention: &Mention) -> UtilResult<Vec<UserId>> {
+pub fn resolve_mention(db: &OknoId, mention: &Mention) -> Vec<UserId> {
     let results = match mention {
         Mention::Username(username) => db.resolve_username(username).map(|id| vec![id]),
         Mention::UserId(id) => db.check_user_exists(*id).then(|| vec![*id]),
         Mention::Firstname(first_name) => {
             let ids = db.get_ids_by_first_name(first_name);
-            ids.is_empty().not().then_some(ids)
+            Some(ids)
         }
     };
 
-    results.ok_or(UtilError::UsageError)
+    results.unwrap_or_default()
 }
 
 pub async fn user_not_found(bot: &Bot, chat_id: ChatId) -> UtilResult<()> {
@@ -77,7 +75,7 @@ pub async fn get_exactly_one_user(
     chat_id: ChatId,
     mention: &Mention,
 ) -> UtilResult<UserId> {
-    let mut targets = resolve_mention(db, mention)?;
+    let mut targets = resolve_mention(db, mention);
 
     if targets.len() > 1 {
         multiple_users_found(bot, db, chat_id, targets.into_iter()).await?;
