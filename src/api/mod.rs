@@ -7,6 +7,7 @@ use axum::{
 };
 use log::{error, info};
 use std::sync::Arc;
+use tower_http::cors::CorsLayer;
 
 pub mod login;
 
@@ -42,10 +43,13 @@ pub async fn serve_api(db: Arc<OknoId>, login: Arc<Login>) -> anyhow::Result<()>
 
     let ctx = Arc::new(ApiContext { db, login });
 
+    let cors = CorsLayer::permissive();
+
     let app = Router::new()
         .route("/v1/auth/{token}", get(login::auth))
         .route("/v1/auth/{token}/ban/{user}", post(login::ban))
         .route("/v1/events", any(login::events_ws))
+        .layer(cors)
         .with_state(ctx);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8888").await?;

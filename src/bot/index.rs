@@ -6,12 +6,11 @@ use crate::{
         session::{SessionState, Sessions},
         utils::{cancel_button, menu_button},
     },
-    config::Config,
     oknoid::OknoId,
 };
 use anyhow::{Result, anyhow};
 use log::{error, info, warn};
-use reqwest::{Client, IntoUrl, Method, StatusCode};
+use reqwest::{Client, IntoUrl, StatusCode};
 use scraper::{Html, Selector};
 use serde::{Deserialize, de::DeserializeOwned};
 use std::{
@@ -19,6 +18,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use reqwest::header::{HeaderMap, AUTHORIZATION};
 use teloxide::{
     Bot,
     payloads::{SendMessageSetters, SendPhotoSetters},
@@ -31,25 +31,69 @@ use teloxide::{
 use tokio::time::sleep;
 use url::Url;
 
-async fn check_game_index(id: i32, title: &str) -> Result<bool> {
-    let response = reqwest::get(Url::parse_with_params(
-        "https://itch.io/search",
-        &[("q", title)],
-    )?)
-    .await?;
-    let document = Html::parse_document(&response.text().await?);
-    let id_str = id.to_string();
+#[derive(Clone)]
+pub struct ItchApi(Client);
 
-    let selector = Selector::parse(".game_cell").unwrap();
-    for element in document.select(&selector) {
-        if element.attr("data-game_id") == Some(id_str.as_str()) {
-            info!("title: {title} Id: {id_str} found");
-            return Ok(true);
-        }
+impl ItchApi {
+    pub fn new(token: impl AsRef<str>) -> Result<Self> {
+        let header = format!("Bearer {}", token.as_ref()).parse()?;
+        let mut headers = HeaderMap::new();
+        headers.append(AUTHORIZATION, header);
+
+        let client = Client::builder()
+            .default_headers(headers)
+            .build()?;
+
+        Ok(Self(client))
     }
 
-    info!("title: {title} Id: {id_str} not found.");
-    Ok(false)
+    async fn get_data<D: DeserializeOwned>(&self, url: impl IntoUrl) -> Result<D> {
+        let data = self.0.get(url).send().await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        Ok(data)
+    }
+
+    async fn check_game_index(&self, id: i32, title: &str) -> Result<bool> {
+        let url = Url::parse_with_params(
+            "https://itch.io/search",
+            &[("q", title)],
+        )?;
+        let response = self.0.get(url).send().await?;
+        let document = Html::parse_document(&response.text().await?);
+        let id_str = id.to_string();
+
+        let selector = Selector::parse(".game_cell").unwrap();
+        for element in document.select(&selector) {
+            if element.attr("data-game_id") == Some(id_str.as_str()) {
+                info!("title: {title} Id: {id_str} found");
+                return Ok(true);
+            }
+        }
+
+        info!("title: {title} Id: {id_str} not found.");
+        Ok(false)
+    }
+
+    async fn get_game_data_by_url(&self, url: Url) -> Result<GameDataByUrl> {
+        let url = data_url_from_game_url(url)?;
+
+        let data = self.get_data(url).await?;
+        Ok(data)
+    }
+
+    async fn get_game_data_by_id(&self, game_id: i32) -> Result<GameDataById> {
+        #[derive(Deserialize)]
+        struct GameDataResponse {
+            game: GameDataById,
+        }
+
+        let data: GameDataResponse =
+            self.get_data(format!("https://api.itch.io/games/{game_id}")).await?;
+        Ok(data.game)
+    }
 }
 
 fn data_url_from_game_url(mut game_url: Url) -> Result<Url> {
@@ -71,37 +115,6 @@ struct GameDataByUrl {
 struct GameDataById {
     title: String,
     url: Url,
-}
-
-async fn get_data<D: DeserializeOwned>(token: &str, url: impl IntoUrl) -> Result<D> {
-    let data = Client::new()
-        .request(Method::GET, url)
-        .bearer_auth(token)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-
-    Ok(data)
-}
-
-async fn get_game_data_by_url(token: &str, url: Url) -> Result<GameDataByUrl> {
-    let url = data_url_from_game_url(url)?;
-
-    let data = get_data(token, url).await?;
-    Ok(data)
-}
-
-async fn get_game_data_by_id(token: &str, game_id: i32) -> Result<GameDataById> {
-    #[derive(Deserialize)]
-    struct GameDataResponse {
-        game: GameDataById,
-    }
-
-    let data: GameDataResponse =
-        get_data(token, format!("https://api.itch.io/games/{game_id}")).await?;
-    Ok(data.game)
 }
 
 async fn index(
@@ -126,7 +139,7 @@ async fn index(
         && domain.ends_with("itch.io")
     {
         ctx.limiter.write_use(user_id);
-        let data = match get_game_data_by_url(ctx.config.itch_token.as_str(), url).await {
+        let data = match ctx.itch.get_game_data_by_url(url).await {
             Ok(data) => data,
             Err(err) => {
                 error!("error get game data: {err:?}");
@@ -153,7 +166,7 @@ async fn index(
             }
         };
 
-        let is_indexed = check_game_index(data.id, data.title.as_str()).await?;
+        let is_indexed = ctx.itch.check_game_index(data.id, data.title.as_str()).await?;
         let msg = if is_indexed {
             "Игра уже проиндексирована!"
         } else {
@@ -278,13 +291,13 @@ pub async fn on_index_help_callback(ctx: &BotContext, info: &CallbackInfo, (): (
     Ok(())
 }
 
-async fn check_games(bot: &Bot, db: &OknoId, itch_token: &str) -> Result<()> {
-    async fn full_game_check(itch_token: &str, game_id: i32) -> Result<(GameDataById, bool)> {
-        let data = get_game_data_by_id(itch_token, game_id).await?;
-        check_game_index(game_id, data.title.as_str())
+async fn check_games(bot: &Bot, db: &OknoId, itch: &ItchApi) -> Result<()> {
+    let full_game_check = async |game_id: i32| -> Result<(GameDataById, bool)> {
+        let data =  itch.get_game_data_by_id(game_id).await?;
+        itch.check_game_index(game_id, data.title.as_str())
             .await
             .map(|is_indexed| (data, is_indexed))
-    }
+    };
 
     let notify_user = async |user_id, url: &Url, title: &str| -> Result<()> {
         let msg = format!("Игра <b>{title}</b> была проиндексирована: {}", url);
@@ -304,7 +317,7 @@ async fn check_games(bot: &Bot, db: &OknoId, itch_token: &str) -> Result<()> {
             notify_user(user_id, url, title.as_str()).await?;
         } else {
             loop {
-                match full_game_check(itch_token, game_id).await {
+                match full_game_check(game_id).await {
                     Ok((data, is_indexed)) => {
                         if is_indexed {
                             info!("game indexed: {game_id}");
@@ -333,9 +346,9 @@ async fn check_games(bot: &Bot, db: &OknoId, itch_token: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn check_games_index_worker(bot: Bot, config: Arc<Config>, db: Arc<OknoId>) {
+pub async fn check_games_index_worker(bot: Bot, itch: ItchApi, db: Arc<OknoId>) {
     loop {
-        if let Err(err) = check_games(&bot, &db, &config.itch_token).await {
+        if let Err(err) = check_games(&bot, &db, &itch).await {
             error!("error check games index: {err}");
         }
         sleep(Duration::from_hours(1)).await;

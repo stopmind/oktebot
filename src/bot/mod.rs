@@ -15,6 +15,7 @@ use crate::{
 };
 use log::{error, info};
 use std::sync::Arc;
+use reqwest::Client;
 use teloxide::{
     RequestError,
     prelude::*,
@@ -22,6 +23,7 @@ use teloxide::{
         BotCommand, Chat, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Me, ParseMode,
     },
 };
+use crate::bot::index::ItchApi;
 
 mod args;
 mod auth;
@@ -36,6 +38,7 @@ pub mod utils;
 
 pub struct BotContext {
     pub bot: Bot,
+    pub itch: ItchApi,
     pub config: Arc<Config>,
     pub db: Arc<OknoId>,
     pub me: Me,
@@ -61,12 +64,13 @@ pub async fn start_bot(
             }
         }
     });
-
+    
+    let itch = ItchApi::new(&config.itch_token)?;
     tokio::spawn({
         let bot = bot.clone();
-        let config = config.clone();
         let db = db.clone();
-        index::check_games_index_worker(bot, config, db)
+        let itch = itch.clone();
+        index::check_games_index_worker(bot, itch, db)
     });
 
     let limiter = Arc::new(Limiter::default());
@@ -79,6 +83,7 @@ pub async fn start_bot(
     router
         .handle_updates(Arc::new(BotContext {
             bot,
+            itch,
             config,
             db,
             me,
